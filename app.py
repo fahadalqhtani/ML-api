@@ -10,7 +10,9 @@ encoder = joblib.load("encoder.pkl")
 selected_features = joblib.load("selected_features.pkl")
 
 # ------------------ FIREBASE SETUP ------------------ #
-cred = credentials.Certificate("projectIot.json")
+import json, os
+cred_data = json.loads(os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
+cred = credentials.Certificate(cred_data)
 
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://iot-sensors-48dda-default-rtdb.asia-southeast1.firebasedatabase.app/'
@@ -138,3 +140,4 @@ def receive_data():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+
