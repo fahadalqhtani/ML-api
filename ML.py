@@ -9,29 +9,7 @@ import random
 # Load dataset from CSV
 df = pd.read_csv("equipment_anomaly_data (1).csv")
 
-# Apply transformations
-# 1. Temperature: keep rows in [50,90], then subtract 30
-df = df[(df['temperature'] >= 50) & (df['temperature'] <= 90)]
-df['temperature'] = df['temperature'] - 30
 
-# 2. Pressure: keep rows in [18,50]
-df = df[(df['pressure'] >= 18) & (df['pressure'] <= 50)]
-
-# 3. Vibration: keep rows in [1,4], then add random +10...15
-df = df[(df['vibration'] >= 1) & (df['vibration'] <= 4)]
-df['vibration'] = df['vibration'].apply(lambda x: x + random.randint(15, 20))
-
-# 4. Drop humidity & location
-df = df.drop(columns=['humidity', 'location'])
-
-# Force equipment names mapping
-df['equipment'] = df['equipment'].replace({
-    "Compressor": "pump101",
-    "Turbine": "pump102"
-})
-
-# Drop أي صفوف ما صارت pump101 أو pump102
-df = df[df['equipment'].isin(["pump101", "pump102"])]
 
 # ================= STEP 1.2: Encode Equipment =================
 encoder = LabelEncoder()
@@ -120,3 +98,4 @@ for i, row in df.iterrows():
 # Show results in table
 results_df = pd.DataFrame(results, columns=['Equipment','Temp','Vibration','Pressure','Risk Score','Status'])
 print("\n📊 Final Results:\n", results_df)
+
