@@ -1,0 +1,7 @@
+Flask
+Flask-Cors
+gunicorn
+psycopg2-binary
+numpy
+scikit-learn
+joblib
