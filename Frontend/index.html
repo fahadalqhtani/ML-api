@@ -1,1 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Equipment Monitoring</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#f5f7fb;
+      --card:#ffffff;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --border:#e5e7eb;
+      --shadow:0 10px 30px rgba(17, 24, 39, 0.08);
+      --pill:#f3f4f6;
+      --alert-panel:#fff7d6;
+      --alert-box:#ffe0e0;
+      --alert-border:#f8c0c0;
+      --ok:#16a34a;
+      --warn:#dc2626;
+    }
 
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 24px;
+      width: 95%;
+      height: 90vh;
+    }
+
+    .panel, .alerts {
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      padding: 24px;
+      position: relative;
+    }
+
+    .panel {
+      background: var(--card);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: flex-start;
+      text-align: left;
+      padding-left: 60px;
+      padding-top: 40px;
+    }
+
+    .alerts {
+      background: var(--alert-panel);
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 30px;
+      width: 100%;
+    }
+
+    .equipment-select {
+      margin-bottom: 60px;
+    }
+
+    select {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-weight: 600;
+      box-shadow: var(--shadow);
+    }
+
+    .stats {
+      display: flex;
+      justify-content: space-between;
+      width: 80%;
+      position: absolute;
+      bottom: 40px;
+      left: 60px;
+    }
+
+    .stat {
+      background: var(--pill);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 30%;
+      text-align: center;
+      padding: 24px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+
+    .stat .label {
+      font-weight: 700;
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    .stat .value {
+      font-size: 20px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .alert {
+      background: var(--alert-box);
+      border: 1px solid var(--alert-border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+
+    .alert strong { font-weight: 800; }
+    .alert.info strong { color: var(--ok); }
+    .alert.warn strong { color: var(--warn); }
+    .alert .time { display: block; margin-top: 6px; color: var(--muted); font-weight: 600; }
+
+    @media (max-width: 900px) {
+      .dashboard { grid-template-columns: 1fr; height: auto; }
+      .panel { align-items: center; text-align: center; padding-left: 20px; }
+      .stats { flex-direction: column; align-items: center; position: relative; padding: 0; left: 0; }
+      .stat { width: 80%; margin-bottom: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="dashboard">
+    <div class="panel">
+      <h1>Equipment Monitoring</h1>
+      <div class="equipment-select">
+        <select>
+          <option>Pump 101</option>
+          <option>Pump 102</option>
+          <option>Compressor A</option>
+          <option>Fan B</option>
+        </select>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Temperature</div>
+          <div class="value">64 °C</div>
+        </div>
+        <div class="stat">
+          <div class="label">Vibration</div>
+          <div class="value">2.3 units</div>
+        </div>
+        <div class="stat">
+          <div class="label">Pressure</div>
+          <div class="value">138 psi</div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="alerts">
+      <h2>Active Alerts</h2>
+      <div class="alert info">
+        <strong>INFO:</strong> Normal operation
+        <span class="time">1:15:38 PM</span>
+      </div>
+      <div class="alert warn">
+        <strong>WARNING:</strong> High vibration detected on Pump 101
+        <span class="time">1:15:38 PM</span>
+      </div>
+    </aside>
+  </section>
+</body>
+</html>
