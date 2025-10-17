@@ -1,7 +1,0 @@
-Flask
-firebase-admin
-numpy
-joblib
-scikit-learn
-gunicorn
-
