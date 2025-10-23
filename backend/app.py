@@ -197,7 +197,7 @@ def list_equipment():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
- @app.get("/latest")
+@app.get("/latest")
 def latest():
     name = request.args.get("equipment_name", "").strip()
     if not name:
@@ -230,6 +230,7 @@ def latest():
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 
