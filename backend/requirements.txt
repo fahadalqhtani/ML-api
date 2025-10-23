@@ -1,7 +1,13 @@
 Flask
 Flask-Cors
+Flask-SocketIO
+python-socketio
+python-engineio
+eventlet
+
 gunicorn
 psycopg2-binary
+SQLAlchemy
 numpy
 scikit-learn
 joblib
