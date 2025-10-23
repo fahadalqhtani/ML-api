@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 import numpy as np
+from flask_cors import CORS
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from sqlalchemy import create_engine, text
