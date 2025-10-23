@@ -4,10 +4,9 @@ Flask-SocketIO
 python-socketio
 python-engineio
 eventlet
-
-gunicorn
-psycopg2-binary
 SQLAlchemy
+psycopg2-binary
 numpy
 scikit-learn
 joblib
+gunicorn
