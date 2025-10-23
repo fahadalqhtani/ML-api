@@ -197,6 +197,36 @@ def list_equipment():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+ @app.get("/latest")
+def latest():
+    name = request.args.get("equipment_name", "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "equipment_name is required"}), 400
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text("""
+                SELECT r.temperature, r.vibration, r.pressure, r.timestamp,
+                       p.probability, p.prediction
+                FROM reading r
+                JOIN prediction p ON p.reading_id = r.id
+                WHERE r.equipment_name = :name
+                ORDER BY r.id DESC
+                LIMIT 1
+            """), {"name": name}).mappings().first()
+        if not row:
+            return jsonify({"ok": True, "data": None})
+        return jsonify({"ok": True, "data": {
+            "temperature": float(row["temperature"]),
+            "vibration": float(row["vibration"]),
+            "pressure": float(row["pressure"]),
+            "timestamp": row["timestamp"].isoformat(),
+            "risk_score": round(float(row["probability"]) * 100),
+            "prediction": int(row["prediction"])
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ===================================================
 # Entry Point
 # ===================================================
