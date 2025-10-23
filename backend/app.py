@@ -31,11 +31,14 @@ RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # % threshold for failu
 # Initialize App, Database, Model
 # ===================================================
 
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_socketio import SocketIO
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
-socketio = SocketIO(app, cors_allowed_origins="*")
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 if not Path(MODEL_PATH).exists():
     raise FileNotFoundError(f"❌ Model file not found: {MODEL_PATH}")
