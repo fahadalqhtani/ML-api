@@ -278,7 +278,7 @@ selectEl.addEventListener('change', () => {
 
 
   // Socket.IO to API origin
-  const socket = io(API_BASE, { transports: ['websocket'] });
+ const socket = io(API_BASE, { transports: ['websocket', 'polling'] });
 
   socket.on('reading_update', (p) => {
     const { equipment_name, temperature, vibration, pressure, risk_score, date } = p || {};
