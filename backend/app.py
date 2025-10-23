@@ -77,7 +77,7 @@ def parse_timestamp(ts_str: str) -> datetime:
 
 def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
     """Predict failure probability using the trained model."""
-    X = np.array([[float(temperature), float(vibration), float(pressure), int(equipment_code)]], dtype=float)
+    X = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
     elif hasattr(model, "decision_function"):
