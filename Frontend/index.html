@@ -232,18 +232,50 @@
     if (all.length > 20) alertsBox.removeChild(all[all.length - 1]);
   }
 
-  async function loadEquipment() {
-    const res = await fetch(`${API_BASE}/equipment`);
-    if (!res.ok) throw new Error('equipment fetch failed');
-    const j = await res.json();
-    const names = (j && j.equipment) || [];
-    selectEl.innerHTML = '';
-    names.forEach(n => ensureOption(n));
-    if (!selectEl.value && selectEl.options.length) {
-      selectEl.value = selectEl.options[0].value;
-    }
+  async function loadLatestForSelected() {
+  if (!selectEl.value) return;
+  const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(selectEl.value)}`);
+  if (!res.ok) return;
+  const j = await res.json();
+  if (!j.ok || !j.data) return;
+  const d = j.data;
+  setIfSelected(selectEl.value, {
+    temperature: d.temperature,
+    vibration: d.vibration,
+    pressure: d.pressure
+  });
+  pushAlert({
+    level: (d.risk_score >= RISK_THRESHOLD) ? 'warn' : 'info',
+    message: `Latest snapshot for ${selectEl.value} (risk ${d.risk_score}%)`,
+    timeStr: new Date(d.timestamp).toLocaleTimeString()
+  });
+}
+
+async function loadEquipment() {
+  const res = await fetch(`${API_BASE}/equipment`);
+  if (!res.ok) throw new Error('equipment fetch failed');
+  const j = await res.json();
+  const names = (j && j.equipment) || [];
+
+  // Optional placeholder
+  selectEl.innerHTML = '<option value="" disabled selected>Choose equipment…</option>';
+  names.forEach(n => ensureOption(n));
+
+  if (names.length) {
+    selectEl.value = names[0];           // auto-select first
+    await loadLatestForSelected();       // ⬅️ pre-fill the cards now
   }
-  loadEquipment().catch(() => { /* show nothing if empty */ });
+}
+loadEquipment().catch(() => {});
+
+// Refresh when user changes device
+selectEl.addEventListener('change', () => {
+  if (tempEl) tempEl.textContent = '—';
+  if (vibEl)  vibEl.textContent  = '—';
+  if (presEl) presEl.textContent = '—';
+  loadLatestForSelected();               // ⬅️ fetch latest for new selection
+});
+
 
   // Socket.IO to API origin
   const socket = io(API_BASE, { transports: ['websocket'] });
