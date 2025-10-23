@@ -126,21 +126,22 @@ def ingest():
             )
 
             # Insert reading
+            # Insert reading (without equipment_code)
             reading_id = conn.execute(
                 text("""
-                    INSERT INTO reading (equipment_name, equipment_code, temperature, pressure, vibration, timestamp)
-                    VALUES (:equipment_name, :equipment_code, :temperature, :pressure, :vibration, :timestamp)
+                    INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
+                    VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
                     RETURNING id
                 """),
                 {
                     "equipment_name": name,
-                    "equipment_code": equipment_code,
                     "temperature": temperature,
                     "pressure": pressure,
                     "vibration": vibration,
                     "timestamp": ts_db,
                 },
             ).scalar_one()
+
 
             # Insert prediction
             conn.execute(
