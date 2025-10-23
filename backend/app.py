@@ -31,6 +31,8 @@ RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # % threshold for failu
 # ===================================================
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
+
 socketio = SocketIO(app, cors_allowed_origins="*")
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
