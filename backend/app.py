@@ -184,6 +184,15 @@ def ingest():
         }
     }), 200
 
+@app.get("/equipment")
+def list_equipment():
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT name FROM equipment ORDER BY name ASC")).all()
+        names = [r[0] for r in rows]
+        return jsonify({"ok": True, "equipment": names})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
 # Entry Point
