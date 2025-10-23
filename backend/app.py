@@ -202,6 +202,7 @@ def latest():
     name = request.args.get("equipment_name", "").strip()
     if not name:
         return jsonify({"ok": False, "error": "equipment_name is required"}), 400
+
     try:
         with engine.begin() as conn:
             row = conn.execute(text("""
@@ -213,18 +214,23 @@ def latest():
                 ORDER BY r.id DESC
                 LIMIT 1
             """), {"name": name}).mappings().first()
-        if not row:
-            return jsonify({"ok": True, "data": None})
-        return jsonify({"ok": True, "data": {
+
+        if row is None:
+            return jsonify({"ok": True, "data": None}), 200
+
+        data = {
             "temperature": float(row["temperature"]),
             "vibration": float(row["vibration"]),
             "pressure": float(row["pressure"]),
             "timestamp": row["timestamp"].isoformat(),
             "risk_score": round(float(row["probability"]) * 100),
-            "prediction": int(row["prediction"])
-        }})
+            "prediction": int(row["prediction"]),
+        }
+        return jsonify({"ok": True, "data": data}), 200
+
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 # ===================================================
