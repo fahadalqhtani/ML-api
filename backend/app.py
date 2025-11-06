@@ -38,9 +38,9 @@ SIM_INTERVAL = float(os.getenv("SIM_INTERVAL", "5"))  # seconds
 
 # Optional: map codes -> friendly device names
 CODE_TO_NAME = {
-    0: "compressorA",
-    1: "pump101",
-    2: "turbineB",
+    0: "Compressor",
+    1: "Pump",
+    2: "Turbine",
 }
 
 # ===================================================
