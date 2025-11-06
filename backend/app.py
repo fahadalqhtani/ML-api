@@ -1,13 +1,16 @@
+# app.py
 import eventlet
 eventlet.monkey_patch()
 
-
 import os
+import itertools
 from datetime import datetime
 from pathlib import Path
+
 import numpy as np
-from flask_cors import CORS
+import pandas as pd
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from flask_socketio import SocketIO
 from sqlalchemy import create_engine, text
 from joblib import load as joblib_load
@@ -17,7 +20,7 @@ from joblib import load as joblib_load
 # ===================================================
 
 def _with_sslmode_require(url: str) -> str:
-    """Ensure Render Postgres uses SSL."""
+    """Ensure Postgres uses SSL on Render-like platforms."""
     if not url:
         return url
     if "sslmode=" in url:
@@ -26,22 +29,28 @@ def _with_sslmode_require(url: str) -> str:
 
 DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
-    raise RuntimeError("Missing DATABASE_URL. Add it in Render Environment settings.")
+    raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-MODEL_PATH = os.getenv("MODEL_PATH", "best_DT.pkl")
-RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # % threshold for failure
+MODEL_PATH = os.getenv("MODEL_PATH", "best_rf.pkl")  # 👈 RandomForest model file
+RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # %
+TEST_CSV_PATH = os.getenv("TEST_CSV_PATH", "test.csv")
+SIM_INTERVAL = float(os.getenv("SIM_INTERVAL", "5"))  # seconds
+
+# Optional: map codes -> friendly device names
+CODE_TO_NAME = {
+    0: "compressorA",
+    1: "pump101",
+    2: "turbineB",
+}
 
 # ===================================================
-# Initialize App, Database, Model
+# Initialize App, DB, Model
 # ===================================================
-
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from flask_socketio import SocketIO
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 if not Path(MODEL_PATH).exists():
@@ -49,13 +58,11 @@ if not Path(MODEL_PATH).exists():
 
 model = joblib_load(MODEL_PATH)
 
-
 # ===================================================
-# Utility Functions
+# Utilities
 # ===================================================
 
 def equipment_code_from_name(name: str) -> int:
-    """Map equipment name to code (compressor=0, pump=1, turbine=2)."""
     n = name.lower().strip()
     if n.startswith("compressor"):
         return 0
@@ -63,20 +70,19 @@ def equipment_code_from_name(name: str) -> int:
         return 1
     if n.startswith("turbine") or n.startswith("turpin"):
         return 2
-    raise ValueError(f"Unknown equipment type for name: {name!r}")
+    return 1  # default pump
 
 def parse_timestamp(ts_str: str) -> datetime:
-    """Parse date like 'YYYY/MM/DD hh:mm' or 'YYYY-MM-DD hh:mm:ss'."""
-    ts_str = ts_str.replace("-", "/").strip()
+    ts = ts_str.replace("-", "/").strip()
     for fmt in ("%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S"):
         try:
-            return datetime.strptime(ts_str, fmt)
+            return datetime.strptime(ts, fmt)
         except ValueError:
             pass
-    raise ValueError("Invalid date format. Use 'YYYY/MM/DD hh:mm'.")
+    return datetime.utcnow()
 
 def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
-    """Predict failure probability using the trained model."""
+    """Use trained model to produce failure probability in %."""
     X = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
@@ -85,9 +91,124 @@ def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
         z = float(model.decision_function(X)[0])
         proba_faulty = 1.0 / (1.0 + exp(-z))
     else:
-        proba_faulty = float(model.predict(X)[0])  # fallback
+        proba_faulty = float(model.predict(X)[0])
     return int(round(proba_faulty * 100))
 
+def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score):
+    """Write reading+prediction to DB and notify frontend."""
+    failurety = 1 if risk_score >= RISK_THRESHOLD else 0
+    ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
+
+    with engine.begin() as conn:
+        # ensure equipment row exists
+        conn.execute(
+            text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
+            {"name": name},
+        )
+        # insert reading
+        reading_id = conn.execute(
+            text("""
+                INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
+                VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
+                RETURNING id
+            """),
+            {
+                "equipment_name": name,
+                "temperature": float(temperature),
+                "pressure": float(pressure),
+                "vibration": float(vibration),
+                "timestamp": ts_db,
+            },
+        ).scalar_one()
+
+        # insert prediction
+        conn.execute(
+            text("""
+                INSERT INTO prediction (reading_id, prediction, probability, timestamp)
+                VALUES (:reading_id, :prediction, :probability, :timestamp)
+            """),
+            {
+                "reading_id": reading_id,
+                "prediction": failurety,
+                "probability": risk_score / 100.0,
+                "timestamp": ts_db,
+            },
+        )
+
+    # notify frontend (websocket)
+    socketio.emit("reading_update", {
+        "date": ts.strftime("%H:%M:%S"),
+        "equipment_name": name,
+        "temperature": float(temperature),
+        "vibration": float(vibration),
+        "pressure": float(pressure),
+        "risk_score": int(risk_score),
+    })
+
+# ===================================================
+# Simulation: read 3 rows per tick (one per equipment code)
+# ===================================================
+
+def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
+    """
+    Every `interval` seconds, emit/store one reading per equipment_code group.
+    Expects CSV columns: temperature, pressure, vibration, equipment_code
+    """
+    print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
+    if not Path(csv_path).exists():
+        print(f"⚠️ CSV not found: {csv_path}. Simulation aborted.")
+        return
+
+    df = pd.read_csv(csv_path)
+    required = {"temperature", "pressure", "vibration", "equipment_code"}
+    if not required.issubset(df.columns):
+        raise RuntimeError(f"{csv_path} must contain columns: {required}. Found: {set(df.columns)}")
+
+    # Create a cycle for each available equipment_code
+    groups = {}
+    for code, g in df.groupby("equipment_code"):
+        g = g[["temperature", "pressure", "vibration"]].reset_index(drop=True)
+        if len(g) == 0:
+            continue
+        groups[int(code)] = itertools.cycle(g.to_dict("records"))
+
+    if not groups:
+        print("⚠️ No groups found in CSV. Simulation aborted.")
+        return
+
+    # sorted codes available in file (e.g. [0,1,2] or a subset)
+    codes = sorted(groups.keys())
+
+    # Warm-up: ensure all equipment exist
+    try:
+        with engine.begin() as conn:
+            for code in codes:
+                conn.execute(
+                    text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
+                    {"name": CODE_TO_NAME.get(code, f"device_{code}")},
+                )
+    except Exception as e:
+        print("DB warmup error:", e)
+
+    print(f"▶️ Simulation groups: {codes} | interval={interval}s")
+
+    while True:
+        for code in codes:
+            try:
+                sample = next(groups[code])
+                name = CODE_TO_NAME.get(code, f"device_{code}")
+                temp = float(sample["temperature"])
+                pres = float(sample["pressure"])
+                vib  = float(sample["vibration"])
+
+                risk = compute_risk_score(temp, vib, pres, code)
+                upsert_and_insert_reading(name, datetime.utcnow(), temp, vib, pres, risk)
+
+            except Exception as e:
+                print(f"⚠️ Simulation error for code={code}: {e}")
+                continue
+
+        eventlet.sleep(interval)
 
 # ===================================================
 # API Routes
@@ -97,100 +218,42 @@ def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
 def health():
     return "OK", 200
 
-
 @app.post("/ingest")
 def ingest():
     """
-    Receives JSON:
+    JSON:
     {
-      "date": "YYYY/MM/DD hh:mm",
+      "date": "YYYY/MM/DD hh:mm[:ss]" (optional),
       "equipment_name": "pump101",
       "temperature": 73.4,
       "vibration": 1.57,
-      "pressure": 29.9,
-      "equipment_code": 1   # optional
+      "pressure": 29.9
     }
     """
     try:
         data = request.get_json(force=True)
-        ts = parse_timestamp(str(data["date"]))
+        ts = parse_timestamp(str(data.get("date", ""))) if data.get("date") else datetime.utcnow()
         name = str(data["equipment_name"]).strip()
         temperature = float(data["temperature"])
         vibration = float(data["vibration"])
         pressure = float(data["pressure"])
-        equipment_code = int(data["equipment_code"]) if "equipment_code" in data else equipment_code_from_name(name)
+        code = equipment_code_from_name(name)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Invalid input: {e}"}), 400
 
-    risk_score = compute_risk_score(temperature, vibration, pressure, equipment_code)
-    failurety = 1 if risk_score >= RISK_THRESHOLD else 0
-    ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
+    risk_score = compute_risk_score(temperature, vibration, pressure, code)
+    upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score)
 
-    # ===================== DB Write =====================
-    try:
-        with engine.begin() as conn:
-            # Ensure equipment exists (no deletion)
-            conn.execute(
-                text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
-                {"name": name},
-            )
-
-            # Insert reading
-            # Insert reading (without equipment_code)
-            reading_id = conn.execute(
-                text("""
-                    INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
-                    VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
-                    RETURNING id
-                """),
-                {
-                    "equipment_name": name,
-                    "temperature": temperature,
-                    "pressure": pressure,
-                    "vibration": vibration,
-                    "timestamp": ts_db,
-                },
-            ).scalar_one()
-
-
-            # Insert prediction
-            conn.execute(
-                text("""
-                    INSERT INTO prediction (reading_id, prediction, probability, timestamp)
-                    VALUES (:reading_id, :prediction, :probability, :timestamp)
-                """),
-                {
-                    "reading_id": reading_id,
-                    "prediction": failurety,
-                    "probability": risk_score / 100.0,
-                    "timestamp": ts_db,
-                },
-            )
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Database write failed: {e}"}), 500
-
-    # ===================== WebSocket Broadcast =====================
-    socketio.emit("reading_update", {
-        "date": ts.strftime("%H:%M"),
-        "equipment_name": name,
-        "equipment_code": equipment_code,
-        "temperature": temperature,
-        "vibration": vibration,
-        "pressure": pressure,
-        "risk_score": risk_score,
-    })
-
-    # ===================== HTTP Response =====================
     return jsonify({
         "ok": True,
         "data": {
-            "date": ts.strftime("%Y/%m/%d %H:%M"),
+            "date": ts.strftime("%Y/%m/%d %H:%M:%S"),
             "equipment_name": name,
             "temperature": temperature,
             "vibration": vibration,
             "pressure": pressure,
             "risk_score": risk_score,
-            "failurety": failurety
+            "failurety": 1 if risk_score >= RISK_THRESHOLD else 0
         }
     }), 200
 
@@ -199,8 +262,7 @@ def list_equipment():
     try:
         with engine.begin() as conn:
             rows = conn.execute(text("SELECT name FROM equipment ORDER BY name ASC")).all()
-        names = [r[0] for r in rows]
-        return jsonify({"ok": True, "equipment": names})
+        return jsonify({"ok": True, "equipment": [r[0] for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -223,7 +285,7 @@ def latest():
             """), {"name": name}).mappings().first()
 
         if row is None:
-            return jsonify({"ok": True, "data": None}), 200
+            return jsonify({"ok": True, "data": None})
 
         data = {
             "temperature": float(row["temperature"]),
@@ -233,18 +295,15 @@ def latest():
             "risk_score": round(float(row["probability"]) * 100),
             "prediction": int(row["prediction"]),
         }
-        return jsonify({"ok": True, "data": data}), 200
-
+        return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
-
-
 
 # ===================================================
 # Entry Point
 # ===================================================
 
 if __name__ == "__main__":
-    import eventlet
+    # Run triplet simulation in the background
+    socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
