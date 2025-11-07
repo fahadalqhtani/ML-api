@@ -96,10 +96,8 @@
     </aside>
   </div>
 
-<!-- Socket.IO client -->
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
-<script>
-/* غيّر الدومين إذا لزم */
+
+ <script>
 const API_BASE = "https://ml-api-ec2k.onrender.com";
 
 const sel = document.getElementById('deviceSelect');
@@ -115,31 +113,8 @@ const fmt = {
 };
 
 let socket = null;
+let pollTimer = null;
 
-/* 1) حمّل الأجهزة ثم اجلب latest مرة واحدة للجهاز الافتراضي */
-async function loadDevices() {
-  sel.innerHTML = '<option disabled selected>Loading devices…</option>';
-  try {
-    const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const devices = Array.isArray(json?.equipment) ? json.equipment : [];
-    sel.innerHTML = '';
-    if (!devices.length) {
-      sel.innerHTML = '<option disabled selected>No devices found</option>';
-      return;
-    }
-    // اجعل أول جهاز افتراضي
-    for (const name of devices) sel.add(new Option(name, name));
-    sel.selectedIndex = 0;
-    await fetchLatest(sel.value);  // جلب مبدئي واحد فقط (ليس polling)
-  } catch (e) {
-    console.error('Failed to load devices:', e);
-    sel.innerHTML = '<option disabled selected>Error loading devices</option>';
-  }
-}
-
-/* 2) استدعاء latest مرة واحدة عند تغيير الجهاز فقط */
 async function fetchLatest(name){
   try{
     const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
@@ -157,57 +132,88 @@ async function fetchLatest(name){
   }
 }
 
-sel.addEventListener('change', async () => {
-  els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-  if (sel.value) await fetchLatest(sel.value); // جلب واحد فقط
-});
+function startFallbackPolling(){
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    if (sel.value) fetchLatest(sel.value);
+  }, 5000);
+}
+function stopFallbackPolling(){
+  if (pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+}
 
-/* 3) WebSocket فقط (بدون polling) + إعادة اتصال */
 function connectSocket(){
+  // اترك الإعدادات الافتراضية (تسمح بالـ polling ثم الترقية إلى WebSocket)
   socket = io(API_BASE, {
-    transports: ['websocket'],   // WebSocket فقط
-    upgrade: false,              // لا تستخدم ترقية من polling
+    withCredentials: false,
+    // لا تحدد transports، ولا تضع upgrade:false
+    timeout: 10000,
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    timeout: 8000,
-    path: '/socket.io',
-    withCredentials: false
+    reconnectionDelayMax: 5000,
+    path: '/socket.io'
   });
 
   socket.on('connect', () => {
     console.log('[Socket] connected', socket.id);
+    stopFallbackPolling(); // عند الاتصال الجيد لا نحتاج polling
   });
 
   socket.on('connect_error', (err) => {
-    console.error('[Socket] connect_error:', err && (err.message || err));
+    console.warn('[Socket] connect_error:', err?.message || err);
+    startFallbackPolling(); // إذا تعذّر الاتصال، فعّل polling
   });
 
   socket.on('disconnect', (reason) => {
     console.warn('[Socket] disconnected:', reason);
-    // سيُعاد الاتصال تلقائياً بواسطة Socket.IO (بدون أي polling)
+    startFallbackPolling(); // فعّل polling أثناء الانقطاع
   });
 
-  // التحديث الفوري حين تصل قراءة جديدة من السيرفر
   socket.on('reading_update', (msg) => {
     const selected = sel.value;
     if (!selected) return;
-    if (msg.equipment_name !== selected) return; // حدث فقط الجهاز المختار
-
+    if (msg.equipment_name !== selected) return; // حدّث فقط الجهاز المختار
     els.temp.textContent = fmt.temp(msg.temperature);
     els.vib .textContent = fmt.vib (msg.vibration);
     els.pres.textContent = fmt.pres(msg.pressure);
   });
 }
 
+async function loadDevices() {
+  sel.innerHTML = '<option disabled selected>Loading devices…</option>';
+  try {
+    const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' } });
+    const json = await res.json();
+    const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+    sel.innerHTML = '';
+    if (!devices.length) {
+      sel.innerHTML = '<option disabled selected>No devices found</option>';
+      return;
+    }
+    for (const name of devices) sel.add(new Option(name, name));
+    sel.selectedIndex = 0;
+    await fetchLatest(sel.value);
+  } catch (e) {
+    console.error('Failed to load devices:', e);
+    sel.innerHTML = '<option disabled selected>Error loading devices</option>';
+  }
+}
+
+sel.addEventListener('change', async () => {
+  els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+  if (sel.value) await fetchLatest(sel.value);
+});
+
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadDevices();  // يملأ القائمة + يجلب latest مرة واحدة
-  connectSocket();      // ثم يعتمد على push عبر WebSocket فقط
+  await loadDevices();
+  connectSocket();
 });
 </script>
 
 
+
 </body>
 </html>
+
 
 
