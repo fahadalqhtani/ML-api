@@ -172,21 +172,68 @@ function connectSocket(){
 }
 
 async function loadDevices() {
-  sel.innerHTML = '<option disabled selected>Loading devices…</option>';
-  try {
-    const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' } });
-    const json = await res.json();
-    const devices = Array.isArray(json?.equipment) ? json.equipment : [];
-    sel.innerHTML = '';
-    if (!devices.length) { sel.innerHTML = '<option disabled selected>No devices found</option>'; return; }
-    for (const name of devices) sel.add(new Option(name, name));
-    sel.selectedIndex = 0;
-    await fetchLatest(sel.value);
-  } catch (e) {
-    console.error('Failed to load devices:', e);
-    sel.innerHTML = '<option disabled selected>Error loading devices</option>';
+  const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
+  setOpt('Loading devices…');
+
+  // Ping لتسخين السيرفر (نتجاهل النتيجة)
+  try { await fetch(`${API_BASE}/`, { mode:'cors' }); } catch {}
+
+  // fetch مع مهلة
+  async function fetchWithTimeout(url, ms = 9000) {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), ms);
+    try {
+      return await fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        mode: 'cors',
+        signal: c.signal
+      });
+    } finally { clearTimeout(t); }
   }
+
+  const maxTries = 6; // محاولات كافية لإيقاظ الخدمة
+  for (let i = 1; i <= maxTries; i++) {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/equipment`, 9000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+
+      sel.innerHTML = '';
+      if (!devices.length) { setOpt('No devices found'); return; }
+
+      for (const name of devices) sel.add(new Option(name, name));
+      sel.selectedIndex = 0;
+
+      // تعبئة أولية للقيم
+      await fetchLatest(sel.value);
+      return;
+    } catch (e) {
+      console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
+      setOpt(i === 1 ? 'Warming up server…' : `Retrying… (${i}/${maxTries})`);
+      await new Promise(r => setTimeout(r, i * 1000)); // انتظار تدريجي
+    }
+  }
+
+  // فشل كل المحاولات: استمر بالمحاولة في الخلفية
+  setOpt('Could not load devices (server waking up)…');
+  const bg = setInterval(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/equipment`, { headers:{Accept:'application/json'}, mode:'cors' });
+      if (!res.ok) return;
+      const json = await res.json();
+      const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+      if (!devices.length) return;
+
+      sel.innerHTML = '';
+      for (const name of devices) sel.add(new Option(name, name));
+      sel.selectedIndex = 0;
+      await fetchLatest(sel.value);
+      clearInterval(bg);
+    } catch {}
+  }, 10000);
 }
+
 
 sel.addEventListener('change', async () => {
   els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
@@ -205,6 +252,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 </body>
 </html>
+
 
 
 
