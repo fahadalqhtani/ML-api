@@ -6,127 +6,47 @@
 <title>Equipment Monitoring</title>
 <style>
   :root{
-    --bg:#f6f8fb;
-    --ink:#1f2937;
-    --muted:#6b7280;
-    --card:#ffffff;
-    --ring:#e5e7eb;
-    --ok:#ffe8d6;
-    --warn:#fde2e2;
-    --alert-bg:#fff8d6;
-    --radius:1rem;
-    --shadow:0 .6rem 1.5rem rgba(0,0,0,.06);
+    --bg:#f6f8fb; --ink:#1f2937; --muted:#6b7280; --card:#ffffff; --ring:#e5e7eb;
+    --ok:#ffe8d6; --warn:#fde2e2; --alert-bg:#fff8d6;
+    --radius:1rem; --shadow:0 .6rem 1.5rem rgba(0,0,0,.06);
   }
-
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
   body{
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-    background:var(--bg);
-    color:var(--ink);
-    font-size:1rem;
-    display:flex;
-    justify-content:center;
-    align-items:center;
+    background:var(--bg); color:var(--ink); font-size:1rem;
+    display:flex; justify-content:center; align-items:center;
   }
-
-  .wrap{
-    width:95vw;
-    height:95vh;
-    display:grid;
-    grid-template-columns:2fr 1fr;
-    gap:1.5rem;
-  }
+  .wrap{ width:95vw; height:95vh; display:grid; grid-template-columns:2fr 1fr; gap:1.5rem; }
   @media (max-width:980px){.wrap{grid-template-columns:1fr;height:auto;}}
 
-  .panel,.alerts{
-    border:.1rem solid var(--ring);
-    border-radius:var(--radius);
-    box-shadow:var(--shadow);
-    padding:2rem;
-  }
-
-  .panel{
-    background:var(--card);
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
-    position:relative;
-  }
-
-  .header{
-    display:flex;
-    flex-direction:column;
-    align-items:flex-start;
-    position:relative;
-    margin-bottom:2rem;
-  }
-
-  h1{
-    margin:0;
-    font-weight:900;
-    font-size:clamp(1.5rem,2.5vw,2.7rem);
-    letter-spacing:.02em;
-  }
+  .panel,.alerts{ border:.1rem solid var(--ring); border-radius:var(--radius); box-shadow:var(--shadow); padding:2rem; }
+  .panel{ background:var(--card); display:flex; flex-direction:column; justify-content:space-between; position:relative; }
+  .header{ display:flex; flex-direction:column; align-items:flex-start; position:relative; margin-bottom:2rem; }
+  h1{ margin:0; font-weight:900; font-size:clamp(1.5rem,2.5vw,2.7rem); letter-spacing:.02em; }
 
   select{
-    padding:.6em 1em;
-    border-radius:.7em;
-    border:.1rem solid var(--ring);
-    background:#fff;
-    font-size:1rem;
-    margin-top:2.5rem;
-    margin-left:.2rem;
+    padding:.6em 1em; border-radius:.7em; border:.1rem solid var(--ring); background:#fff; font-size:1rem;
+    margin-top:2.5rem; margin-left:.2rem; min-width:14rem;
   }
 
-  .metrics{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:1rem;
-    margin-top:2rem;
-  }
-
+  .metrics{ display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-top:2rem; }
   @media (max-width:900px){.metrics{grid-template-columns:repeat(2,1fr);}}
   @media (max-width:500px){.metrics{grid-template-columns:1fr;}}
 
   .metric{
-    background:#f3f6fb;
-    border:.1rem solid var(--ring);
-    border-radius:.9rem;
-    text-align:center;
-    padding:1.4rem;
-    min-height:10rem;
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
+    background:#f3f6fb; border:.1rem solid var(--ring); border-radius:.9rem; text-align:center;
+    padding:1.4rem; min-height:10rem; display:flex; flex-direction:column; justify-content:space-between;
     transition:transform .2s ease;
   }
-
   .metric:hover{transform:translateY(-.2rem);}
   .metric h3{margin:0;font-size:1.2rem;font-weight:700;}
   .metric .value{font-size:1.4rem;font-weight:800;margin-top:auto;}
 
-  .alerts{
-    background:var(--alert-bg);
-  }
-
-  .alerts h2{
-    margin:0 0 1rem;
-    font-size:clamp(1.3rem,2vw,1.8rem);
-    font-weight:900;
-  }
-
-  .alert{
-    background:var(--warn);
-    border:.1rem solid #f6caca;
-    border-radius:.8rem;
-    padding:1rem 1.2rem;
-    margin-top:1rem;
-  }
-  .alert.ok{
-    background:var(--ok);
-    border-color:#ffd6b6;
-  }
+  .alerts{ background:var(--alert-bg); }
+  .alerts h2{ margin:0 0 1rem; font-size:clamp(1.3rem,2vw,1.8rem); font-weight:900; }
+  .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
+  .alert.ok{ background:var(--ok); border-color:#ffd6b6; }
   .alert strong{margin-right:.4rem;}
   .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.9rem;}
 </style>
@@ -138,10 +58,9 @@
       <div class="header">
         <h1>Equipment Monitoring</h1>
         <label>
-          <select aria-label="Select equipment">
-            <option>Pump 101</option>
-            <option>Pump 102</option>
-            <option>Compressor A</option>
+          <!-- سيُملأ من /equipment -->
+          <select id="deviceSelect" aria-label="Select equipment">
+            <option disabled selected>Loading devices…</option>
           </select>
         </label>
       </div>
@@ -149,15 +68,15 @@
       <div class="metrics">
         <div class="metric" aria-label="Temperature">
           <h3>Temperature</h3>
-          <div class="value">64 °C</div>
+          <div class="value" id="tempVal">64 °C</div>
         </div>
         <div class="metric" aria-label="Vibration">
           <h3>Vibration</h3>
-          <div class="value">2.3 units</div>
+          <div class="value" id="vibVal">2.3 units</div>
         </div>
         <div class="metric" aria-label="Pressure">
           <h3>Pressure</h3>
-          <div class="value">138 psi</div>
+          <div class="value" id="presVal">138 psi</div>
         </div>
       </div>
     </section>
@@ -177,5 +96,70 @@
       </div>
     </aside>
   </div>
+
+<script>
+/**
+ * ✅ اضبط رابط الـ API:
+ * - إذا الصفحة تُخدَّم من نفس الدومين والباك-إند خلف نفس المسار: اتركه فارغًا "" وسيستخدم relative paths.
+ * - إذا الباك-إند على Render بدومين مختلف: ضع الرابط مثل "https://ml-api-xxxx.onrender.com"
+ */
+const API_BASE = ""; // مثال: "https://ml-api-ec2k.onrender.com"
+
+/** جلب الأجهزة من /equipment وتعبئة الـ<select> */
+async function loadDevices() {
+  const sel = document.getElementById('deviceSelect');
+  sel.innerHTML = '<option disabled selected>Loading devices…</option>';
+  try {
+    const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' }});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const devices = (json && json.equipment) ? json.equipment : [];
+    sel.innerHTML = ''; // clear
+    if (devices.length === 0) {
+      sel.innerHTML = '<option disabled selected>No devices found</option>';
+      return;
+    }
+    // أضف خيارًا افتراضيًا
+    const ph = document.createElement('option');
+    ph.textContent = 'Select a device…';
+    ph.disabled = true; ph.selected = true;
+    sel.appendChild(ph);
+
+    // عبئة القائمة من قاعدة البيانات
+    for (const name of devices) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    console.error('Failed to load devices:', e);
+    sel.innerHTML = '<option disabled selected>Error loading devices</option>';
+  }
+}
+
+/** مثال: عند تغيير الجهاز، يمكنك جلب آخر قراءة من /latest?equipment_name= */
+document.getElementById('deviceSelect').addEventListener('change', async (e) => {
+  const name = e.target.value;
+  if (!name) return;
+  try {
+    const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json && json.ok && json.data) {
+      const d = json.data;
+      // حدث القيم (يمكن تعديل الوحدات حسب نظامك)
+      document.getElementById('tempVal').textContent = `${Number(d.temperature).toFixed(1)} °C`;
+      document.getElementById('vibVal').textContent  = `${Number(d.vibration).toFixed(2)} units`;
+      document.getElementById('presVal').textContent = `${Number(d.pressure).toFixed(0)} psi`;
+    }
+  } catch (err) {
+    console.error('Failed to load latest reading:', err);
+  }
+});
+
+// شغّل عند التحميل
+document.addEventListener('DOMContentLoaded', loadDevices);
+</script>
 </body>
 </html>
