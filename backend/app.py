@@ -31,12 +31,12 @@ DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-MODEL_PATH = os.getenv("MODEL_PATH", "best_rf.pkl")  # 👈 RandomForest model file
-RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # %
+MODEL_PATH = os.getenv("MODEL_PATH", "best_rf.pkl")
+RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))     # percent threshold
 TEST_CSV_PATH = os.getenv("TEST_CSV_PATH", "test.csv")
-SIM_INTERVAL = float(os.getenv("SIM_INTERVAL", "5"))  # seconds
+SIM_INTERVAL = float(os.getenv("SIM_INTERVAL", "5"))        # seconds
 
-# Optional: map codes -> friendly device names
+# Friendly names for each equipment_code in the CSV
 CODE_TO_NAME = {
     0: "Compressor",
     1: "Pump",
@@ -82,7 +82,7 @@ def parse_timestamp(ts_str: str) -> datetime:
     return datetime.utcnow()
 
 def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
-    """Use trained model to produce failure probability in %."""
+    """Predict failure probability (%) using the trained model."""
     X = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
@@ -100,7 +100,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
     with engine.begin() as conn:
-        # ensure equipment row exists
+        # ensure equipment exists
         conn.execute(
             text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
             {"name": name},
@@ -135,7 +135,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         )
 
-    # notify frontend (websocket)
+    # notify frontend via websocket (optional for your UI)
     socketio.emit("reading_update", {
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
@@ -146,13 +146,13 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     })
 
 # ===================================================
-# Simulation: read 3 rows per tick (one per equipment code)
+# Simulation loop (CSV -> DB)
 # ===================================================
 
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
     """
-    Every `interval` seconds, emit/store one reading per equipment_code group.
-    Expects CSV columns: temperature, pressure, vibration, equipment_code
+    Every `interval` seconds, store one reading per equipment_code group.
+    CSV must have: temperature, pressure, vibration, equipment_code
     """
     print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
     if not Path(csv_path).exists():
@@ -164,7 +164,6 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
     if not required.issubset(df.columns):
         raise RuntimeError(f"{csv_path} must contain columns: {required}. Found: {set(df.columns)}")
 
-    # Create a cycle for each available equipment_code
     groups = {}
     for code, g in df.groupby("equipment_code"):
         g = g[["temperature", "pressure", "vibration"]].reset_index(drop=True)
@@ -176,10 +175,9 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
         print("⚠️ No groups found in CSV. Simulation aborted.")
         return
 
-    # sorted codes available in file (e.g. [0,1,2] or a subset)
     codes = sorted(groups.keys())
 
-    # Warm-up: ensure all equipment exist
+    # warm up: ensure rows in equipment
     try:
         with engine.begin() as conn:
             for code in codes:
@@ -224,7 +222,7 @@ def ingest():
     JSON:
     {
       "date": "YYYY/MM/DD hh:mm[:ss]" (optional),
-      "equipment_name": "pump101",
+      "equipment_name": "Pump",
       "temperature": 73.4,
       "vibration": 1.57,
       "pressure": 29.9
@@ -300,10 +298,23 @@ def latest():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
-# Entry Point
+# Start background simulation once (works under Gunicorn)
 # ===================================================
 
+_SIM_STARTED = False
+
+def _ensure_simulation_started():
+    """Run CSV simulation once per process (skip if DISABLE_SIM=1)."""
+    global _SIM_STARTED
+    if not _SIM_STARTED and os.getenv("DISABLE_SIM", "0") != "1":
+        _SIM_STARTED = True
+        socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
+
+@app.before_first_request
+def _on_first_request():
+    _ensure_simulation_started()
+
+# Local dev
 if __name__ == "__main__":
-    # Run triplet simulation in the background
-    socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
+    _ensure_simulation_started()
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
