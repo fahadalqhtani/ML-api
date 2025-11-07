@@ -90,7 +90,7 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
   const API_BASE = "https://ml-api-ec2k.onrender.com";
-  const RISK_THRESHOLD = 85; // العتبة المطلوبة
+  const RISK_THRESHOLD = 85; // العتبة
 
   const sel = document.getElementById('deviceSelect');
   const alertsList = document.getElementById('alertsList');
@@ -110,7 +110,7 @@
   let socket = null;
   let pollTimer = null;
   let devices = [];                 // أسماء الأجهزة
-  const alertsMap = new Map();      // name -> {name, time}
+  const alertsMap = new Map();      // name -> {name, time, _ts}
 
   // ======= UI helpers =======
   function renderAlerts(){
@@ -118,7 +118,7 @@
     const alerts = Array.from(alertsMap.values());
     if (!alerts.length) return; // تبقى فارغة إذا لا يوجد أي تنبيه
 
-    // عرض بترتيب الأحدث أولاً
+    // الأحدث أولاً
     alerts.sort((a,b) => b._ts - a._ts);
 
     for (const a of alerts) {
@@ -154,14 +154,17 @@
     }
   }
 
+  // ⚠️ تعديل مهم: لا نحذف التنبيه إذا لم تصل قراءة (null).
+  // نحذف فقط عندما نرى قراءة فعلًا ورِسْكها < العتبة.
   async function fetchAllLatestAndBuildAlerts(){
     if (!devices.length) return;
-
-    // نحدّث التنبيهات لكل الأجهزة دفعة واحدة
     const results = await Promise.all(devices.map(n => fetchLatest(n)));
     results.forEach((data, idx) => {
       const name = devices[idx];
-      if (!data) { clearAlert(name); return; }
+      if (!data) {
+        // لا تفعل شيئًا: أبقِ التنبيه ظاهرًا حتى تصل قراءة سليمة
+        return;
+      }
       const risk = Number(data.risk_score || 0);
       const timeStr = (data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : fmt.clock());
       if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr);
@@ -202,10 +205,9 @@
       console.warn('[Socket] disconnected:', r);
     });
 
-    // نحدّث الكروت فقط عند اختيار نفس الجهاز،
-    // لكن "التنبيهات" نحدّثها دائماً لأي جهاز.
+    // نحدث الكروت لِـ"الجهاز المختار" فقط
+    // لكن "التنبيهات" نحدّثها دائمًا لأي جهاز
     socket.on('reading_update', (msg) => {
-      // تحديث الكروت إذا الجهاز المختار
       const selected = String(sel.value||'').trim().toLowerCase();
       const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
       if (selected && incoming === selected) {
@@ -214,7 +216,7 @@
         els.pres.textContent = fmt.pres(msg.pressure);
       }
 
-      // تحديث التنبيهات دائمًا
+      // تحديث التنبيهات الدائم
       const risk = Number(msg?.risk_score||0);
       const timeStr = msg?.date || fmt.clock();
       const name = String(msg?.equipment_name||'').trim();
@@ -259,7 +261,7 @@
         for (const name of devices) sel.add(new Option(name, name));
         sel.selectedIndex = 0;
 
-        // تعبئة كروت أولية للجهاز المختار
+        // تعبئة الكروت للجهاز المختار
         const first = await fetchLatest(sel.value);
         if (first){
           els.temp.textContent = fmt.temp(first.temperature);
@@ -292,9 +294,8 @@
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
-
-    connectSocket();      // سوكِت للتحديث الفوري
-    startPollingAlerts(); // باك-أب: نحدّث التنبيهات كل 5 ثواني أيضاً
+    connectSocket();      // WebSocket للتحديث الفوري
+    startPollingAlerts(); // باك-أب كل 5 ثوانٍ
   });
   </script>
 </body>
