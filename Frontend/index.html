@@ -112,25 +112,34 @@ const fmt = {
   pres: v => `${Number(v).toFixed(0)} psi`,
 };
 
-// 1) دالة تطبيع أسماء الأجهزة (frontend فقط)
+// تطبيع اسم الجهاز للمطابقة المرنة (Pump ↔ Pump 101)
 function slug(s){
-  return String(s||'')
-    .toLowerCase()
-    .normalize('NFKD')                // يسهّل إزالة التشكيل
-    .replace(/[\u0300-\u036f]/g,'')   // إزالة التشكيل
-    .replace(/[^a-z0-9]+/g,'')        // إزالة كل ما عدا أرقام/حروف لاتينية
-    .trim();
+  return String(s||'').toLowerCase().normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim();
 }
-// نسمح بأن الاسم الوارد يبدأ/ينتهي بالآخر (Pump ↔ Pump101)
 function isSameDeviceName(a,b){
   const A = slug(a), B = slug(b);
-  if(!A || !B) return false;
-  return A===B || A.startsWith(B) || B.startsWith(A);
+  return A && B && (A===B || A.startsWith(B) || B.startsWith(A));
 }
 
-let socket = null;
+// (1) جلب أولي "مرة واحدة" لملء البطاقات عند التحميل وتبديل الجهاز
+async function fetchLatestOnce(name){
+  try{
+    const r = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`,
+                          { headers:{'Accept':'application/json'} });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { ok, data } = await r.json();
+    if (ok && data){
+      els.temp.textContent = fmt.temp(data.temperature);
+      els.vib .textContent = fmt.vib (data.vibration);
+      els.pres.textContent = fmt.pres(data.pressure);
+    } else {
+      els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+    }
+  }catch(e){ console.error('fetchLatestOnce error:', e); }
+}
 
-// 2) تحميل الأجهزة مرة واحدة (لا يوجد polling)
+// (2) تحميل الأجهزة مرة واحدة + تعبئة أولية فورية
 async function loadDevices() {
   sel.innerHTML = '<option disabled selected>Loading devices…</option>';
   try {
@@ -142,16 +151,19 @@ async function loadDevices() {
       sel.innerHTML = '<option disabled selected>No devices found</option>';
       return;
     }
-    // اعرض الأسماء كما هي من الـAPI
     for (const name of devices) sel.add(new Option(name, name));
     sel.selectedIndex = 0;
+
+    // ✅ تعبئة أولية مرّة واحدة
+    await fetchLatestOnce(sel.value);
   } catch (e) {
     console.error('Failed to load devices:', e);
     sel.innerHTML = '<option disabled selected>Error loading devices</option>';
   }
 }
 
-// 3) اتصال السوكِت فقط (بدون أي setInterval)
+// (3) اتصال السوكِت فقط (بدون أي setInterval/polling)
+let socket = null;
 function connectSocket(){
   if (!window.io) { console.error('Socket.IO not loaded'); return; }
 
@@ -164,23 +176,19 @@ function connectSocket(){
     path: '/socket.io'
   });
 
-  // لوجر عام لكل الأحداث لمعرفة وش قاعد يوصل فعلاً
+  // لوج عام لكل الأحداث للتشخيص
   socket.onAny((event, ...args) => {
-    if (event !== 'pong') { // تجاهل نبضات الحياة إن وجدت
-      console.log('[Socket][ANY]', event, ...args);
-    }
+    if (event !== 'pong') console.log('[Socket][ANY]', event, ...args);
   });
 
-  socket.on('connect', () => {
-    console.log('[Socket] connected', socket.id);
-  });
+  socket.on('connect', () => console.log('[Socket] connected', socket.id));
   socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
   socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
 
-  // استلام التحديثات الفورية
+  // استلام التحديث الفوري
   socket.on('reading_update', (msg) => {
-    const selectedName = sel.value;            // الاسم الحالي من القائمة
-    const incomingName = msg?.equipment_name;  // الاسم القادم من السيرفر
+    const selectedName = sel.value;
+    const incomingName = msg?.equipment_name;
     if (!isSameDeviceName(incomingName, selectedName)) return;
 
     console.log('[Socket] update for', incomingName, msg);
@@ -190,24 +198,21 @@ function connectSocket(){
   });
 }
 
-// 4) عند تغيير الجهاز: لا polling—فقط نعيد القيم لـ "--" حتى يصل push القادم
-sel.addEventListener('change', () => {
+// (4) عند تغيير الجهاز: أعد تعبئة القيم مرة واحدة وانتظر push
+sel.addEventListener('change', async () => {
   els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-  // لا نطلق fetch دوري. التحديث سيصل عبر reading_update تلقائياً.
+  await fetchLatestOnce(sel.value);   // ✅ تعبئة فورية مرّة واحدة
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadDevices();  // يملأ القائمة فقط
-  connectSocket();      // يعتمد كليًا على push من السوكِت
+  await loadDevices();   // يملأ القائمة + يجلب آخر قراءة مرة واحدة
+  connectSocket();       // بعدها التحديثات تأتي بالـpush فقط
 });
 </script>
 
-
-
-
-
 </body>
 </html>
+
 
 
 
