@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#f6f8fb; --ink:#1f2937; --muted:#6b7280; --card:#ffffff; --ring:#e5e7eb;
-    --ok:#ffe8d6; --warn:#fde2e2; --alert-bg:#fff8d6;
+    --warn:#fde2e2; --alert-bg:#fff8d6;
     --radius:1rem; --shadow:0 .6rem 1.5rem rgba(0,0,0,.06);
   }
   *{box-sizing:border-box}
@@ -46,9 +46,9 @@
   .alerts{ background:var(--alert-bg); }
   .alerts h2{ margin:0 0 1rem; font-size:clamp(1.3rem,2vw,1.8rem); font-weight:900; }
   .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
-  .alert.ok{ background:var(--ok); border-color:#ffd6b6; }
   .alert strong{margin-right:.4rem;}
   .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.9rem;}
+  .empty{ color:var(--muted); font-style:italic; margin-top:.5rem; }
 </style>
 </head>
 <body>
@@ -83,32 +83,22 @@
     <!-- Right panel -->
     <aside class="alerts" aria-label="Active alerts">
       <h2>Active Alerts</h2>
-
-      <div class="alert ok" role="status">
-        <strong>INFO:</strong> Normal operation
-        <span class="time" id="infoTime">--:--:--</span>
-      </div>
-
-      <div class="alert" role="status" aria-live="assertive" id="warnBox" style="display:none">
-        <strong>WARNING:</strong> <span id="warnText">High vibration detected</span>
-        <span class="time" id="warnTime">--:--:--</span>
-      </div>
+      <div id="alertsList"></div>
     </aside>
   </div>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
   const API_BASE = "https://ml-api-ec2k.onrender.com";
+  const RISK_THRESHOLD = 85; // العتبة المطلوبة
 
   const sel = document.getElementById('deviceSelect');
+  const alertsList = document.getElementById('alertsList');
+
   const els = {
     temp: document.getElementById('tempVal'),
     vib : document.getElementById('vibVal'),
     pres: document.getElementById('presVal'),
-    infoTime: document.getElementById('infoTime'),
-    warnBox: document.getElementById('warnBox'),
-    warnText: document.getElementById('warnText'),
-    warnTime: document.getElementById('warnTime'),
   };
   const fmt = {
     temp: v => `${Number(v).toFixed(1)} °C`,
@@ -119,34 +109,75 @@
 
   let socket = null;
   let pollTimer = null;
+  let devices = [];                 // أسماء الأجهزة
+  const alertsMap = new Map();      // name -> {name, time}
 
+  // ======= UI helpers =======
+  function renderAlerts(){
+    alertsList.innerHTML = '';
+    const alerts = Array.from(alertsMap.values());
+    if (!alerts.length) return; // تبقى فارغة إذا لا يوجد أي تنبيه
+
+    // عرض بترتيب الأحدث أولاً
+    alerts.sort((a,b) => b._ts - a._ts);
+
+    for (const a of alerts) {
+      const box = document.createElement('div');
+      box.className = 'alert';
+      box.innerHTML = `
+        <strong>WARNING:</strong> High failure risk detected on ${a.name}
+        <span class="time">${a.time}</span>
+      `;
+      alertsList.appendChild(box);
+    }
+  }
+
+  function upsertAlert(name, timeStr){
+    alertsMap.set(name, { name, time: timeStr, _ts: Date.now() });
+    renderAlerts();
+  }
+  function clearAlert(name){
+    if (alertsMap.delete(name)) renderAlerts();
+  }
+
+  // ======= Data fetchers =======
   async function fetchLatest(name){
     try{
       const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
       if(!res.ok) throw new Error(`HTTP ${res.status}`);
       const { ok, data } = await res.json();
-      if (ok && data) {
-        els.temp.textContent = fmt.temp(data.temperature);
-        els.vib .textContent = fmt.vib (data.vibration);
-        els.pres.textContent = fmt.pres(data.pressure);
-        els.infoTime.textContent = fmt.clock();
-      } else {
-        els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-      }
-    } catch (err) { console.error('latest error:', err); }
+      if (ok && data) return data;
+      return null;
+    } catch (err) {
+      console.error('latest error:', err);
+      return null;
+    }
   }
 
-  function startPollingAlways(){
+  async function fetchAllLatestAndBuildAlerts(){
+    if (!devices.length) return;
+
+    // نحدّث التنبيهات لكل الأجهزة دفعة واحدة
+    const results = await Promise.all(devices.map(n => fetchLatest(n)));
+    results.forEach((data, idx) => {
+      const name = devices[idx];
+      if (!data) { clearAlert(name); return; }
+      const risk = Number(data.risk_score || 0);
+      const timeStr = (data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : fmt.clock());
+      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr);
+      else clearAlert(name);
+    });
+  }
+
+  function startPollingAlerts(){
     if (pollTimer) return;
-    pollTimer = setInterval(() => {
-      if (sel.value) fetchLatest(sel.value);
-    }, 5000);
+    pollTimer = setInterval(fetchAllLatestAndBuildAlerts, 5000);
   }
 
+  // ======= Socket.IO =======
   function connectSocket(){
     if (!window.io) { console.warn('io() not found → polling only'); return; }
 
-    // إجبار WebSocket بدون ترقية من polling
     socket = io(API_BASE, {
       withCredentials: false,
       transports: ['websocket'],
@@ -161,7 +192,6 @@
 
     socket.on('connect', () => {
       console.log('[Socket] connected', socket.id);
-      if (sel.value) fetchLatest(sel.value);
     });
 
     socket.on('connect_error', (e) => {
@@ -172,35 +202,36 @@
       console.warn('[Socket] disconnected:', r);
     });
 
+    // نحدّث الكروت فقط عند اختيار نفس الجهاز،
+    // لكن "التنبيهات" نحدّثها دائماً لأي جهاز.
     socket.on('reading_update', (msg) => {
+      // تحديث الكروت إذا الجهاز المختار
       const selected = String(sel.value||'').trim().toLowerCase();
       const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
-      if (!selected || incoming !== selected) return;
-
-      els.temp.textContent = fmt.temp(msg.temperature);
-      els.vib .textContent = fmt.vib (msg.vibration);
-      els.pres.textContent = fmt.pres(msg.pressure);
-      els.infoTime.textContent = msg.date || fmt.clock();
-
-      // مثال تنبيه بسيط حسب الـrisk_score
-      if (Number(msg.risk_score) >= 85) {
-        els.warnText.textContent = `High risk on ${msg.equipment_name}`;
-        els.warnTime.textContent = msg.date || fmt.clock();
-        els.warnBox.style.display = '';
-      } else {
-        els.warnBox.style.display = 'none';
+      if (selected && incoming === selected) {
+        els.temp.textContent = fmt.temp(msg.temperature);
+        els.vib .textContent = fmt.vib (msg.vibration);
+        els.pres.textContent = fmt.pres(msg.pressure);
       }
+
+      // تحديث التنبيهات دائمًا
+      const risk = Number(msg?.risk_score||0);
+      const timeStr = msg?.date || fmt.clock();
+      const name = String(msg?.equipment_name||'').trim();
+      if (!name) return;
+
+      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr);
+      else clearAlert(name);
     });
   }
 
+  // ======= Bootstrapping =======
   async function loadDevices() {
     const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
     setOpt('Loading devices…');
 
-    // Ping لتسخين السيرفر (نتجاهل النتيجة)
     try { await fetch(`${API_BASE}/`, { mode:'cors' }); } catch {}
 
-    // fetch مع مهلة
     async function fetchWithTimeout(url, ms = 9000) {
       const c = new AbortController();
       const t = setTimeout(() => c.abort(), ms);
@@ -213,13 +244,14 @@
       } finally { clearTimeout(t); }
     }
 
-    const maxTries = 6; // محاولات كافية لإيقاظ الخدمة
+    const maxTries = 6;
     for (let i = 1; i <= maxTries; i++) {
       try {
         const res = await fetchWithTimeout(`${API_BASE}/equipment`, 9000);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+        const arr = Array.isArray(json?.equipment) ? json.equipment : [];
+        devices = arr;
 
         sel.innerHTML = '';
         if (!devices.length) { setOpt('No devices found'); return; }
@@ -227,66 +259,42 @@
         for (const name of devices) sel.add(new Option(name, name));
         sel.selectedIndex = 0;
 
-        // تعبئة أولية للقيم
-        await fetchLatest(sel.value);
+        // تعبئة كروت أولية للجهاز المختار
+        const first = await fetchLatest(sel.value);
+        if (first){
+          els.temp.textContent = fmt.temp(first.temperature);
+          els.vib .textContent = fmt.vib (first.vibration);
+          els.pres.textContent = fmt.pres(first.pressure);
+        }
+
+        // بناء التنبيهات لكل الأجهزة
+        await fetchAllLatestAndBuildAlerts();
         return;
       } catch (e) {
         console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
         setOpt(i === 1 ? 'Warming up server…' : `Retrying… (${i}/${maxTries})`);
-        await new Promise(r => setTimeout(r, i * 1000)); // انتظار تدريجي
+        await new Promise(r => setTimeout(r, i * 1000));
       }
     }
 
-    // فشل كل المحاولات: استمر بالمحاولة في الخلفية
     setOpt('Could not load devices (server waking up)…');
-    const bg = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/equipment`, { headers:{Accept:'application/json'}, mode:'cors' });
-        if (!res.ok) return;
-        const json = await res.json();
-        const devices = Array.isArray(json?.equipment) ? json.equipment : [];
-        if (!devices.length) return;
-
-        sel.innerHTML = '';
-        for (const name of devices) sel.add(new Option(name, name));
-        sel.selectedIndex = 0;
-        await fetchLatest(sel.value);
-        clearInterval(bg);
-      } catch {}
-    }, 10000);
   }
 
   sel.addEventListener('change', async () => {
     els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-    if (sel.value) await fetchLatest(sel.value);
+    const d = await fetchLatest(sel.value);
+    if (d){
+      els.temp.textContent = fmt.temp(d.temperature);
+      els.vib .textContent = fmt.vib (d.vibration);
+      els.pres.textContent = fmt.pres(d.pressure);
+    }
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
 
-    connectSocket(); // نحاول السوكِت أولاً
-
-    // باك-أب: إن ما توفر io() أو تأخر الاتصال، نفعل polling
-    let fallbackStarted = false;
-    function ensurePollingFallback() {
-      if (!fallbackStarted) {
-        fallbackStarted = true;
-        startPollingAlways();
-        console.warn('[Fallback] Using HTTP polling every 5s');
-      }
-    }
-
-    if (!window.io) {
-      ensurePollingFallback();
-    } else {
-      // لو تأخر السوكِت بالاتصال أكثر من 8 ثواني، فعّل الباك-أب
-      setTimeout(() => {
-        if (!socket || socket.disconnected) ensurePollingFallback();
-      }, 8000);
-
-      // ولو انقطع لاحقاً، فعّل الباك-أب
-      if (socket) socket.on('disconnect', ensurePollingFallback);
-    }
+    connectSocket();      // سوكِت للتحديث الفوري
+    startPollingAlerts(); // باك-أب: نحدّث التنبيهات كل 5 ثواني أيضاً
   });
   </script>
 </body>
