@@ -86,174 +86,208 @@
 
       <div class="alert ok" role="status">
         <strong>INFO:</strong> Normal operation
-        <span class="time">1:15:38 PM</span>
+        <span class="time" id="infoTime">--:--:--</span>
       </div>
 
-      <div class="alert" role="status" aria-live="assertive">
-        <strong>WARNING:</strong> High vibration detected on Pump 101
-        <span class="time">1:15:38 PM</span>
+      <div class="alert" role="status" aria-live="assertive" id="warnBox" style="display:none">
+        <strong>WARNING:</strong> <span id="warnText">High vibration detected</span>
+        <span class="time" id="warnTime">--:--:--</span>
       </div>
     </aside>
   </div>
 
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+  const API_BASE = "https://ml-api-ec2k.onrender.com";
 
+  const sel = document.getElementById('deviceSelect');
+  const els = {
+    temp: document.getElementById('tempVal'),
+    vib : document.getElementById('vibVal'),
+    pres: document.getElementById('presVal'),
+    infoTime: document.getElementById('infoTime'),
+    warnBox: document.getElementById('warnBox'),
+    warnText: document.getElementById('warnText'),
+    warnTime: document.getElementById('warnTime'),
+  };
+  const fmt = {
+    temp: v => `${Number(v).toFixed(1)} °C`,
+    vib : v => `${Number(v).toFixed(2)} units`,
+    pres: v => `${Number(v).toFixed(0)} psi`,
+    clock: () => new Date().toLocaleTimeString(),
+  };
 
+  let socket = null;
+  let pollTimer = null;
 
+  async function fetchLatest(name){
+    try{
+      const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { ok, data } = await res.json();
+      if (ok && data) {
+        els.temp.textContent = fmt.temp(data.temperature);
+        els.vib .textContent = fmt.vib (data.vibration);
+        els.pres.textContent = fmt.pres(data.pressure);
+        els.infoTime.textContent = fmt.clock();
+      } else {
+        els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+      }
+    } catch (err) { console.error('latest error:', err); }
+  }
 
-    
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
-<script>
-const API_BASE = "https://ml-api-ec2k.onrender.com";
+  function startPollingAlways(){
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      if (sel.value) fetchLatest(sel.value);
+    }, 5000);
+  }
 
-const sel = document.getElementById('deviceSelect');
-const els = {
-  temp: document.getElementById('tempVal'),
-  vib : document.getElementById('vibVal'),
-  pres: document.getElementById('presVal'),
-};
-const fmt = {
-  temp: v => `${Number(v).toFixed(1)} °C`,
-  vib : v => `${Number(v).toFixed(2)} units`,
-  pres: v => `${Number(v).toFixed(0)} psi`,
-};
+  function connectSocket(){
+    if (!window.io) { console.warn('io() not found → polling only'); return; }
 
-let socket = null;
-let pollTimer = null;
+    // إجبار WebSocket بدون ترقية من polling
+    socket = io(API_BASE, {
+      withCredentials: false,
+      transports: ['websocket'],
+      upgrade: false,
+      timeout: 10000,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      path: '/socket.io'
+    });
 
-async function fetchLatest(name){
-  try{
-    const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { ok, data } = await res.json();
-    if (ok && data) {
-      els.temp.textContent = fmt.temp(data.temperature);
-      els.vib .textContent = fmt.vib (data.vibration);
-      els.pres.textContent = fmt.pres(data.pressure);
+    socket.on('connect', () => {
+      console.log('[Socket] connected', socket.id);
+      if (sel.value) fetchLatest(sel.value);
+    });
+
+    socket.on('connect_error', (e) => {
+      console.warn('[Socket] connect_error:', e?.message||e);
+    });
+
+    socket.on('disconnect', (r) => {
+      console.warn('[Socket] disconnected:', r);
+    });
+
+    socket.on('reading_update', (msg) => {
+      const selected = String(sel.value||'').trim().toLowerCase();
+      const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
+      if (!selected || incoming !== selected) return;
+
+      els.temp.textContent = fmt.temp(msg.temperature);
+      els.vib .textContent = fmt.vib (msg.vibration);
+      els.pres.textContent = fmt.pres(msg.pressure);
+      els.infoTime.textContent = msg.date || fmt.clock();
+
+      // مثال تنبيه بسيط حسب الـrisk_score
+      if (Number(msg.risk_score) >= 85) {
+        els.warnText.textContent = `High risk on ${msg.equipment_name}`;
+        els.warnTime.textContent = msg.date || fmt.clock();
+        els.warnBox.style.display = '';
+      } else {
+        els.warnBox.style.display = 'none';
+      }
+    });
+  }
+
+  async function loadDevices() {
+    const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
+    setOpt('Loading devices…');
+
+    // Ping لتسخين السيرفر (نتجاهل النتيجة)
+    try { await fetch(`${API_BASE}/`, { mode:'cors' }); } catch {}
+
+    // fetch مع مهلة
+    async function fetchWithTimeout(url, ms = 9000) {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), ms);
+      try {
+        return await fetch(url, {
+          headers: { 'Accept': 'application/json' },
+          mode: 'cors',
+          signal: c.signal
+        });
+      } finally { clearTimeout(t); }
+    }
+
+    const maxTries = 6; // محاولات كافية لإيقاظ الخدمة
+    for (let i = 1; i <= maxTries; i++) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE}/equipment`, 9000);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+
+        sel.innerHTML = '';
+        if (!devices.length) { setOpt('No devices found'); return; }
+
+        for (const name of devices) sel.add(new Option(name, name));
+        sel.selectedIndex = 0;
+
+        // تعبئة أولية للقيم
+        await fetchLatest(sel.value);
+        return;
+      } catch (e) {
+        console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
+        setOpt(i === 1 ? 'Warming up server…' : `Retrying… (${i}/${maxTries})`);
+        await new Promise(r => setTimeout(r, i * 1000)); // انتظار تدريجي
+      }
+    }
+
+    // فشل كل المحاولات: استمر بالمحاولة في الخلفية
+    setOpt('Could not load devices (server waking up)…');
+    const bg = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/equipment`, { headers:{Accept:'application/json'}, mode:'cors' });
+        if (!res.ok) return;
+        const json = await res.json();
+        const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+        if (!devices.length) return;
+
+        sel.innerHTML = '';
+        for (const name of devices) sel.add(new Option(name, name));
+        sel.selectedIndex = 0;
+        await fetchLatest(sel.value);
+        clearInterval(bg);
+      } catch {}
+    }, 10000);
+  }
+
+  sel.addEventListener('change', async () => {
+    els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+    if (sel.value) await fetchLatest(sel.value);
+  });
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    await loadDevices();
+
+    connectSocket(); // نحاول السوكِت أولاً
+
+    // باك-أب: إن ما توفر io() أو تأخر الاتصال، نفعل polling
+    let fallbackStarted = false;
+    function ensurePollingFallback() {
+      if (!fallbackStarted) {
+        fallbackStarted = true;
+        startPollingAlways();
+        console.warn('[Fallback] Using HTTP polling every 5s');
+      }
+    }
+
+    if (!window.io) {
+      ensurePollingFallback();
     } else {
-      els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+      // لو تأخر السوكِت بالاتصال أكثر من 8 ثواني، فعّل الباك-أب
+      setTimeout(() => {
+        if (!socket || socket.disconnected) ensurePollingFallback();
+      }, 8000);
+
+      // ولو انقطع لاحقاً، فعّل الباك-أب
+      if (socket) socket.on('disconnect', ensurePollingFallback);
     }
-  } catch (err) { console.error('latest error:', err); }
-}
-
-function startPollingAlways(){
-  if (pollTimer) return;
-  pollTimer = setInterval(() => {
-    if (sel.value) fetchLatest(sel.value);
-  }, 5000);
-}
-
-function connectSocket(){
-  if (!window.io) { console.warn('io() not found → polling only'); return; }
-
-  socket = io(API_BASE, {
-    withCredentials: false,
-    timeout: 10000,
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelayMax: 5000,
-    path: '/socket.io'
   });
-
-  socket.on('connect', () => console.log('[Socket] connected', socket.id));
-  socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
-  socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
-
-  socket.on('reading_update', (msg) => {
-    // مطابقة مرنة للاسم
-    const selected = String(sel.value||'').trim().toLowerCase();
-    const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
-    if (!selected || incoming !== selected) return;
-
-    console.log('[Socket] update for', msg.equipment_name, msg); // للتأكد
-    els.temp.textContent = fmt.temp(msg.temperature);
-    els.vib .textContent = fmt.vib (msg.vibration);
-    els.pres.textContent = fmt.pres(msg.pressure);
-  });
-}
-
-async function loadDevices() {
-  const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
-  setOpt('Loading devices…');
-
-  // Ping لتسخين السيرفر (نتجاهل النتيجة)
-  try { await fetch(`${API_BASE}/`, { mode:'cors' }); } catch {}
-
-  // fetch مع مهلة
-  async function fetchWithTimeout(url, ms = 9000) {
-    const c = new AbortController();
-    const t = setTimeout(() => c.abort(), ms);
-    try {
-      return await fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        mode: 'cors',
-        signal: c.signal
-      });
-    } finally { clearTimeout(t); }
-  }
-
-  const maxTries = 6; // محاولات كافية لإيقاظ الخدمة
-  for (let i = 1; i <= maxTries; i++) {
-    try {
-      const res = await fetchWithTimeout(`${API_BASE}/equipment`, 9000);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const devices = Array.isArray(json?.equipment) ? json.equipment : [];
-
-      sel.innerHTML = '';
-      if (!devices.length) { setOpt('No devices found'); return; }
-
-      for (const name of devices) sel.add(new Option(name, name));
-      sel.selectedIndex = 0;
-
-      // تعبئة أولية للقيم
-      await fetchLatest(sel.value);
-      return;
-    } catch (e) {
-      console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
-      setOpt(i === 1 ? 'Warming up server…' : `Retrying… (${i}/${maxTries})`);
-      await new Promise(r => setTimeout(r, i * 1000)); // انتظار تدريجي
-    }
-  }
-
-  // فشل كل المحاولات: استمر بالمحاولة في الخلفية
-  setOpt('Could not load devices (server waking up)…');
-  const bg = setInterval(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/equipment`, { headers:{Accept:'application/json'}, mode:'cors' });
-      if (!res.ok) return;
-      const json = await res.json();
-      const devices = Array.isArray(json?.equipment) ? json.equipment : [];
-      if (!devices.length) return;
-
-      sel.innerHTML = '';
-      for (const name of devices) sel.add(new Option(name, name));
-      sel.selectedIndex = 0;
-      await fetchLatest(sel.value);
-      clearInterval(bg);
-    } catch {}
-  }, 10000);
-}
-
-
-sel.addEventListener('change', async () => {
-  els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-  if (sel.value) await fetchLatest(sel.value);
-});
-
-document.addEventListener('DOMContentLoaded', async () => {
-  await loadDevices();
-  startPollingAlways();   // ✅ شغّال دائمًا كشبكة أمان
-  connectSocket();        // ✅ للتحديث الفوري حين يشتغل السوكِت
-});
-</script>
-
-
-
-
+  </script>
 </body>
 </html>
-
-
-
-
-
