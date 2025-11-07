@@ -49,7 +49,15 @@ CODE_TO_NAME = {
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="eventlet",
+    ping_interval=20,   # نبض كل 20 ثانية
+    ping_timeout=30,    # مهلة الرد 30 ثانية
+    path="/socket.io",
+)
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
@@ -134,7 +142,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         )
 
-    # بث للفرونت-إند (اختياري)
+    # بث للفرونت-إند (تحديث فوري)
     socketio.emit("reading_update", {
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
@@ -215,6 +223,11 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 @app.get("/health")
 def health():
     return "OK", 200
+
+@app.get("/")
+def root():
+    # يُستخدم للتسخين ولفحص جاهزية الخدمة من الواجهة
+    return jsonify({"ok": True, "service": "equipment-monitoring", "socket": True}), 200
 
 @app.post("/ingest")
 def ingest():
@@ -311,6 +324,11 @@ def _ensure_simulation_started():
 
 # ابدأ المحاكاة فور تحميل التطبيق (بديل before_first_request في Flask 3)
 _ensure_simulation_started()
+
+# Socket.IO logging helpers (اختياري)
+@socketio.on('connect')
+def on_connect():
+    print('🔌 client connected')
 
 # Local run
 if __name__ == "__main__":
