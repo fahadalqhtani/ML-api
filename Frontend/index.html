@@ -96,6 +96,11 @@
     </aside>
   </div>
 
+
+
+
+
+    
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
 <script>
 const API_BASE = "https://ml-api-ec2k.onrender.com";
@@ -112,34 +117,60 @@ const fmt = {
   pres: v => `${Number(v).toFixed(0)} psi`,
 };
 
-// تطبيع اسم الجهاز للمطابقة المرنة (Pump ↔ Pump 101)
-function slug(s){
-  return String(s||'').toLowerCase().normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim();
-}
-function isSameDeviceName(a,b){
-  const A = slug(a), B = slug(b);
-  return A && B && (A===B || A.startsWith(B) || B.startsWith(A));
-}
+let socket = null;
+let pollTimer = null;
 
-// (1) جلب أولي "مرة واحدة" لملء البطاقات عند التحميل وتبديل الجهاز
-async function fetchLatestOnce(name){
+async function fetchLatest(name){
   try{
-    const r = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`,
-                          { headers:{'Accept':'application/json'} });
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const { ok, data } = await r.json();
-    if (ok && data){
+    const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { ok, data } = await res.json();
+    if (ok && data) {
       els.temp.textContent = fmt.temp(data.temperature);
       els.vib .textContent = fmt.vib (data.vibration);
       els.pres.textContent = fmt.pres(data.pressure);
     } else {
       els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
     }
-  }catch(e){ console.error('fetchLatestOnce error:', e); }
+  } catch (err) { console.error('latest error:', err); }
 }
 
-// (2) تحميل الأجهزة مرة واحدة + تعبئة أولية فورية
+function startPollingAlways(){
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    if (sel.value) fetchLatest(sel.value);
+  }, 5000);
+}
+
+function connectSocket(){
+  if (!window.io) { console.warn('io() not found → polling only'); return; }
+
+  socket = io(API_BASE, {
+    withCredentials: false,
+    timeout: 10000,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelayMax: 5000,
+    path: '/socket.io'
+  });
+
+  socket.on('connect', () => console.log('[Socket] connected', socket.id));
+  socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
+  socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
+
+  socket.on('reading_update', (msg) => {
+    // مطابقة مرنة للاسم
+    const selected = String(sel.value||'').trim().toLowerCase();
+    const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
+    if (!selected || incoming !== selected) return;
+
+    console.log('[Socket] update for', msg.equipment_name, msg); // للتأكد
+    els.temp.textContent = fmt.temp(msg.temperature);
+    els.vib .textContent = fmt.vib (msg.vibration);
+    els.pres.textContent = fmt.pres(msg.pressure);
+  });
+}
+
 async function loadDevices() {
   sel.innerHTML = '<option disabled selected>Loading devices…</option>';
   try {
@@ -147,96 +178,33 @@ async function loadDevices() {
     const json = await res.json();
     const devices = Array.isArray(json?.equipment) ? json.equipment : [];
     sel.innerHTML = '';
-    if (!devices.length) {
-      sel.innerHTML = '<option disabled selected>No devices found</option>';
-      return;
-    }
+    if (!devices.length) { sel.innerHTML = '<option disabled selected>No devices found</option>'; return; }
     for (const name of devices) sel.add(new Option(name, name));
     sel.selectedIndex = 0;
-
-    // ✅ تعبئة أولية مرّة واحدة
-    await fetchLatestOnce(sel.value);
+    await fetchLatest(sel.value);
   } catch (e) {
     console.error('Failed to load devices:', e);
     sel.innerHTML = '<option disabled selected>Error loading devices</option>';
   }
 }
 
-let socket = null;
-
-function connectSocket(){
-  if (!window.io) { console.error('Socket.IO not loaded'); return; }
-
-  // استخدم WebSocket فقط لتجنب XHR/CORS
-  const opts = {
-    transports: ['websocket'], // ✅ WebSocket فقط
-    upgrade: false,            // لا تحاول الترقية من polling
-    withCredentials: false,
-    timeout: 12000,
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 8000,
-    path: '/socket.io'        // إن لم يعمل جرّب '/socket.io/'
-  };
-
-  socket = io('https://ml-api-ec2k.onrender.com', opts);
-
-  socket.onAny((ev, ...args) => { if (ev !== 'pong') console.log('[Socket][ANY]', ev, ...args); });
-  socket.on('connect', () => console.log('[Socket] connected', socket.id));
-  socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
-  socket.on('reconnect_error', (e) => console.warn('[Socket] reconnect_error:', e?.message||e));
-  socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
-
-  socket.on('reading_update', (msg) => {
-    const selectedName = sel.value;
-    const incomingName = msg?.equipment_name;
-    if (!isSameDeviceName(incomingName, selectedName)) return;
-    els.temp.textContent = fmt.temp(msg.temperature);
-    els.vib .textContent = fmt.vib (msg.vibration);
-    els.pres.textContent = fmt.pres(msg.pressure);
-  });
-
-  // جرّب مسارًا بذيل سلاش إذا فشل الاتصال الأول
-  setTimeout(() => {
-    if (socket && socket.connected) return;
-    console.warn('[Socket] retry with path=/socket.io/ (WebSocket only)');
-    try {
-      socket.close();
-    } catch {}
-    socket = io('https://ml-api-ec2k.onrender.com', { ...opts, path: '/socket.io/' });
-    socket.onAny((ev, ...args) => { if (ev !== 'pong') console.log('[Socket][ANY]', ev, ...args); });
-    socket.on('connect', () => console.log('[Socket] connected', socket.id));
-    socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
-    socket.on('reconnect_error', (e) => console.warn('[Socket] reconnect_error:', e?.message||e));
-    socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
-    socket.on('reading_update', (msg) => {
-      if (!isSameDeviceName(msg?.equipment_name, sel.value)) return;
-      els.temp.textContent = fmt.temp(msg.temperature);
-      els.vib .textContent = fmt.vib (msg.vibration);
-      els.pres.textContent = fmt.pres(msg.pressure);
-    });
-  }, 3000);
-}
-
-// (4) عند تغيير الجهاز: أعد تعبئة القيم مرة واحدة وانتظر push
 sel.addEventListener('change', async () => {
   els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-  await fetchLatestOnce(sel.value);   // ✅ تعبئة فورية مرّة واحدة
+  if (sel.value) await fetchLatest(sel.value);
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadDevices();   // يملأ القائمة + يجلب آخر قراءة مرة واحدة
-  connectSocket();       // بعدها التحديثات تأتي بالـpush فقط
+  await loadDevices();
+  startPollingAlways();   // ✅ شغّال دائمًا كشبكة أمان
+  connectSocket();        // ✅ للتحديث الفوري حين يشتغل السوكِت
 });
 </script>
 
+
+
+
 </body>
 </html>
-
-
-
-
 
 
 
