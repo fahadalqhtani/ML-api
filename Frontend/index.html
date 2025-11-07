@@ -58,7 +58,7 @@
       <div class="header">
         <h1>Equipment Monitoring</h1>
         <label>
-          <!-- سيُملأ من /equipment -->
+          <!-- يُملأ آليًا من /equipment -->
           <select id="deviceSelect" aria-label="Select equipment">
             <option disabled selected>Loading devices…</option>
           </select>
@@ -68,15 +68,15 @@
       <div class="metrics">
         <div class="metric" aria-label="Temperature">
           <h3>Temperature</h3>
-          <div class="value" id="tempVal">64 °C</div>
+          <div class="value" id="tempVal">-- °C</div>
         </div>
         <div class="metric" aria-label="Vibration">
           <h3>Vibration</h3>
-          <div class="value" id="vibVal">2.3 units</div>
+          <div class="value" id="vibVal">-- units</div>
         </div>
         <div class="metric" aria-label="Pressure">
           <h3>Pressure</h3>
-          <div class="value" id="presVal">138 psi</div>
+          <div class="value" id="presVal">-- psi</div>
         </div>
       </div>
     </section>
@@ -98,34 +98,42 @@
   </div>
 
 <script>
-/**
- * ✅ اضبط رابط الـ API:
- * - إذا الصفحة تُخدَّم من نفس الدومين والباك-إند خلف نفس المسار: اتركه فارغًا "" وسيستخدم relative paths.
- * - إذا الباك-إند على Render بدومين مختلف: ضع الرابط مثل "https://ml-api-xxxx.onrender.com"
- */
-const API_BASE = "https://ml-api-ec2k.onrender.com"; // مثال: "https://ml-api-ec2k.onrender.com"
+/** 🔗 عدّل هذا لو كان لديك دومين مختلف للـ API */
+const API_BASE = "https://ml-api-ec2k.onrender.com";
 
-/** جلب الأجهزة من /equipment وتعبئة الـ<select> */
+/** fetch مع مهلة */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/** تحميل قائمة الأجهزة */
 async function loadDevices() {
   const sel = document.getElementById('deviceSelect');
   sel.innerHTML = '<option disabled selected>Loading devices…</option>';
   try {
-    const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' }});
+    const res = await fetchWithTimeout(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' }}, 8000);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const devices = (json && json.equipment) ? json.equipment : [];
-    sel.innerHTML = ''; // clear
+
+    sel.innerHTML = '';
     if (devices.length === 0) {
       sel.innerHTML = '<option disabled selected>No devices found</option>';
       return;
     }
-    // أضف خيارًا افتراضيًا
+
     const ph = document.createElement('option');
     ph.textContent = 'Select a device…';
     ph.disabled = true; ph.selected = true;
     sel.appendChild(ph);
 
-    // عبئة القائمة من قاعدة البيانات
     for (const name of devices) {
       const opt = document.createElement('option');
       opt.value = name;
@@ -138,29 +146,41 @@ async function loadDevices() {
   }
 }
 
-/** مثال: عند تغيير الجهاز، يمكنك جلب آخر قراءة من /latest?equipment_name= */
+/** تحديث القيم عند تغيير الجهاز */
 document.getElementById('deviceSelect').addEventListener('change', async (e) => {
   const name = e.target.value;
   if (!name) return;
   try {
-    const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
+    const res = await fetchWithTimeout(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`, {}, 8000);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json && json.ok && json.data) {
       const d = json.data;
-      // حدث القيم (يمكن تعديل الوحدات حسب نظامك)
       document.getElementById('tempVal').textContent = `${Number(d.temperature).toFixed(1)} °C`;
       document.getElementById('vibVal').textContent  = `${Number(d.vibration).toFixed(2)} units`;
       document.getElementById('presVal').textContent = `${Number(d.pressure).toFixed(0)} psi`;
+    } else {
+      document.getElementById('tempVal').textContent = '-- °C';
+      document.getElementById('vibVal').textContent  = '-- units';
+      document.getElementById('presVal').textContent = '-- psi';
     }
   } catch (err) {
     console.error('Failed to load latest reading:', err);
   }
 });
 
-// شغّل عند التحميل
-document.addEventListener('DOMContentLoaded', loadDevices);
+/** إعادة المحاولة تلقائيًا لأن خدمة Render قد تحتاج “صحوة” */
+async function autoRetryDevices() {
+  const sel = document.getElementById('deviceSelect');
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    await loadDevices();
+    const txt = sel.querySelector('option')?.textContent || '';
+    if (!/Loading devices|Error loading devices/i.test(txt)) break; // success
+    await new Promise(r => setTimeout(r, 4000));
+  }
+}
+
+document.addEventListener('DOMContentLoaded', autoRetryDevices);
 </script>
 </body>
 </html>
-
