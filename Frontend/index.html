@@ -99,11 +99,11 @@
 <!-- Socket.IO client -->
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
 <script>
-/* ✳️ عدّل هذا الرابط إن كان الـAPI على دومين مختلف */
-const API_BASE = "https://ml-api-ec2k.onrender.com"; // مثال: "https://ml-api-ec2k.onrender.com"
+/* غيّر الدومين إذا لزم */
+const API_BASE = "https://ml-api-ec2k.onrender.com";
 
-const sel  = document.getElementById('deviceSelect');
-const els  = {
+const sel = document.getElementById('deviceSelect');
+const els = {
   temp: document.getElementById('tempVal'),
   vib : document.getElementById('vibVal'),
   pres: document.getElementById('presVal'),
@@ -114,7 +114,9 @@ const fmt = {
   pres: v => `${Number(v).toFixed(0)} psi`,
 };
 
-/** 1) حمّل الأجهزة من /equipment */
+let socket = null;
+
+/* 1) حمّل الأجهزة ثم اجلب latest مرة واحدة للجهاز الافتراضي */
 async function loadDevices() {
   sel.innerHTML = '<option disabled selected>Loading devices…</option>';
   try {
@@ -127,17 +129,17 @@ async function loadDevices() {
       sel.innerHTML = '<option disabled selected>No devices found</option>';
       return;
     }
-    const ph = new Option('Select a device…', '', true, true);
-    ph.disabled = true;
-    sel.add(ph);
+    // اجعل أول جهاز افتراضي
     for (const name of devices) sel.add(new Option(name, name));
+    sel.selectedIndex = 0;
+    await fetchLatest(sel.value);  // جلب مبدئي واحد فقط (ليس polling)
   } catch (e) {
     console.error('Failed to load devices:', e);
     sel.innerHTML = '<option disabled selected>Error loading devices</option>';
   }
 }
 
-/** 2) جلب آخر قراءة للجهاز المختار (latest) عند تغيير الـselect */
+/* 2) استدعاء latest مرة واحدة عند تغيير الجهاز فقط */
 async function fetchLatest(name){
   try{
     const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
@@ -155,23 +157,42 @@ async function fetchLatest(name){
   }
 }
 
-sel.addEventListener('change', () => {
-  const name = sel.value;
-  // نظّف العرض ثم استدعي latest مرة واحدة
+sel.addEventListener('change', async () => {
   els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-  if (name) fetchLatest(name);
+  if (sel.value) await fetchLatest(sel.value); // جلب واحد فقط
 });
 
-/** 3) Socket.IO: استقبل push من السيرفر وحدث فقط للجهاز المختار */
-let socket;
+/* 3) WebSocket فقط (بدون polling) + إعادة اتصال */
 function connectSocket(){
-  socket = io(API_BASE || undefined, {
-    transports: ['websocket', 'polling'],
+  socket = io(API_BASE, {
+    transports: ['websocket'],   // WebSocket فقط
+    upgrade: false,              // لا تستخدم ترقية من polling
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    timeout: 8000,
+    path: '/socket.io',
+    withCredentials: false
   });
+
+  socket.on('connect', () => {
+    console.log('[Socket] connected', socket.id);
+  });
+
+  socket.on('connect_error', (err) => {
+    console.error('[Socket] connect_error:', err && (err.message || err));
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.warn('[Socket] disconnected:', reason);
+    // سيُعاد الاتصال تلقائياً بواسطة Socket.IO (بدون أي polling)
+  });
+
+  // التحديث الفوري حين تصل قراءة جديدة من السيرفر
   socket.on('reading_update', (msg) => {
     const selected = sel.value;
     if (!selected) return;
-    if (msg.equipment_name !== selected) return; // حدّث فقط للجهاز المختار
+    if (msg.equipment_name !== selected) return; // حدث فقط الجهاز المختار
 
     els.temp.textContent = fmt.temp(msg.temperature);
     els.vib .textContent = fmt.vib (msg.vibration);
@@ -180,10 +201,13 @@ function connectSocket(){
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadDevices();
-  connectSocket();
+  await loadDevices();  // يملأ القائمة + يجلب latest مرة واحدة
+  connectSocket();      // ثم يعتمد على push عبر WebSocket فقط
 });
 </script>
+
+
 </body>
 </html>
+
 
