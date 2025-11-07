@@ -162,40 +162,61 @@ async function loadDevices() {
   }
 }
 
-// (3) اتصال السوكِت فقط (بدون أي setInterval/polling)
 let socket = null;
+
 function connectSocket(){
   if (!window.io) { console.error('Socket.IO not loaded'); return; }
 
-  socket = io(API_BASE, {
+  // استخدم WebSocket فقط لتجنب XHR/CORS
+  const opts = {
+    transports: ['websocket'], // ✅ WebSocket فقط
+    upgrade: false,            // لا تحاول الترقية من polling
     withCredentials: false,
-    timeout: 10000,
+    timeout: 12000,
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelayMax: 5000,
-    path: '/socket.io'
-  });
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 8000,
+    path: '/socket.io'        // إن لم يعمل جرّب '/socket.io/'
+  };
 
-  // لوج عام لكل الأحداث للتشخيص
-  socket.onAny((event, ...args) => {
-    if (event !== 'pong') console.log('[Socket][ANY]', event, ...args);
-  });
+  socket = io('https://ml-api-ec2k.onrender.com', opts);
 
+  socket.onAny((ev, ...args) => { if (ev !== 'pong') console.log('[Socket][ANY]', ev, ...args); });
   socket.on('connect', () => console.log('[Socket] connected', socket.id));
   socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
+  socket.on('reconnect_error', (e) => console.warn('[Socket] reconnect_error:', e?.message||e));
   socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
 
-  // استلام التحديث الفوري
   socket.on('reading_update', (msg) => {
     const selectedName = sel.value;
     const incomingName = msg?.equipment_name;
     if (!isSameDeviceName(incomingName, selectedName)) return;
-
-    console.log('[Socket] update for', incomingName, msg);
     els.temp.textContent = fmt.temp(msg.temperature);
     els.vib .textContent = fmt.vib (msg.vibration);
     els.pres.textContent = fmt.pres(msg.pressure);
   });
+
+  // جرّب مسارًا بذيل سلاش إذا فشل الاتصال الأول
+  setTimeout(() => {
+    if (socket && socket.connected) return;
+    console.warn('[Socket] retry with path=/socket.io/ (WebSocket only)');
+    try {
+      socket.close();
+    } catch {}
+    socket = io('https://ml-api-ec2k.onrender.com', { ...opts, path: '/socket.io/' });
+    socket.onAny((ev, ...args) => { if (ev !== 'pong') console.log('[Socket][ANY]', ev, ...args); });
+    socket.on('connect', () => console.log('[Socket] connected', socket.id));
+    socket.on('connect_error', (e) => console.warn('[Socket] connect_error:', e?.message||e));
+    socket.on('reconnect_error', (e) => console.warn('[Socket] reconnect_error:', e?.message||e));
+    socket.on('disconnect', (r) => console.warn('[Socket] disconnected:', r));
+    socket.on('reading_update', (msg) => {
+      if (!isSameDeviceName(msg?.equipment_name, sel.value)) return;
+      els.temp.textContent = fmt.temp(msg.temperature);
+      els.vib .textContent = fmt.vib (msg.vibration);
+      els.pres.textContent = fmt.pres(msg.pressure);
+    });
+  }, 3000);
 }
 
 // (4) عند تغيير الجهاز: أعد تعبئة القيم مرة واحدة وانتظر push
@@ -212,6 +233,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 </body>
 </html>
+
 
 
 
