@@ -31,12 +31,12 @@ DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-MODEL_PATH = os.getenv("MODEL_PATH", "best_rf.pkl")
-RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))     # percent threshold
-TEST_CSV_PATH = os.getenv("TEST_CSV_PATH", "test.csv")
-SIM_INTERVAL = float(os.getenv("SIM_INTERVAL", "5"))        # seconds
+MODEL_PATH     = os.getenv("MODEL_PATH", "best_rf.pkl")  # اسم ملف الموديل
+RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # %
+TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")  # بيانات السيموليشن
+SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # ثواني
 
-# Friendly names for each equipment_code in the CSV
+# خريطة الكود إلى اسم الجهاز
 CODE_TO_NAME = {
     0: "Compressor",
     1: "Pump",
@@ -55,7 +55,6 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 if not Path(MODEL_PATH).exists():
     raise FileNotFoundError(f"❌ Model file not found: {MODEL_PATH}")
-
 model = joblib_load(MODEL_PATH)
 
 # ===================================================
@@ -82,7 +81,7 @@ def parse_timestamp(ts_str: str) -> datetime:
     return datetime.utcnow()
 
 def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
-    """Predict failure probability (%) using the trained model."""
+    """Use trained model to produce failure probability in %."""
     X = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
@@ -100,12 +99,12 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
     with engine.begin() as conn:
-        # ensure equipment exists
+        # تأكد من وجود الجهاز
         conn.execute(
             text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
             {"name": name},
         )
-        # insert reading
+        # إدخال القراءة
         reading_id = conn.execute(
             text("""
                 INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
@@ -121,7 +120,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         ).scalar_one()
 
-        # insert prediction
+        # إدخال التنبؤ
         conn.execute(
             text("""
                 INSERT INTO prediction (reading_id, prediction, probability, timestamp)
@@ -135,7 +134,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         )
 
-    # notify frontend via websocket (optional for your UI)
+    # بث للفرونت-إند (اختياري)
     socketio.emit("reading_update", {
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
@@ -146,13 +145,13 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     })
 
 # ===================================================
-# Simulation loop (CSV -> DB)
+# Simulation: one row per equipment code every interval
 # ===================================================
 
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
     """
-    Every `interval` seconds, store one reading per equipment_code group.
-    CSV must have: temperature, pressure, vibration, equipment_code
+    Every `interval` seconds, emit/store one reading per equipment_code group.
+    CSV columns required: temperature, pressure, vibration, equipment_code
     """
     print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
     if not Path(csv_path).exists():
@@ -164,6 +163,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
     if not required.issubset(df.columns):
         raise RuntimeError(f"{csv_path} must contain columns: {required}. Found: {set(df.columns)}")
 
+    # cycles per equipment_code
     groups = {}
     for code, g in df.groupby("equipment_code"):
         g = g[["temperature", "pressure", "vibration"]].reset_index(drop=True)
@@ -177,7 +177,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 
     codes = sorted(groups.keys())
 
-    # warm up: ensure rows in equipment
+    # warm-up: ensure devices exist
     try:
         with engine.begin() as conn:
             for code in codes:
@@ -298,11 +298,10 @@ def latest():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
-# Start background simulation once (works under Gunicorn)
+# Start background simulation once (Flask 3 friendly)
 # ===================================================
 
 _SIM_STARTED = False
-
 def _ensure_simulation_started():
     """Run CSV simulation once per process (skip if DISABLE_SIM=1)."""
     global _SIM_STARTED
@@ -310,11 +309,10 @@ def _ensure_simulation_started():
         _SIM_STARTED = True
         socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
 
-@app.before_first_request
-def _on_first_request():
-    _ensure_simulation_started()
+# ابدأ المحاكاة فور تحميل التطبيق (بديل before_first_request في Flask 3)
+_ensure_simulation_started()
 
-# Local dev
+# Local run
 if __name__ == "__main__":
     _ensure_simulation_started()
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
