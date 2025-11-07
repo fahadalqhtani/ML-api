@@ -69,20 +69,19 @@
     letter-spacing:.02em;
   }
 
-  /* move select box downward and to the left */
   select{
     padding:.6em 1em;
     border-radius:.7em;
     border:.1rem solid var(--ring);
     background:#fff;
     font-size:1rem;
-    margin-top:2.5rem; /* lowered position */
-    margin-left:.2rem; /* keep aligned left */
+    margin-top:2.5rem;
+    margin-left:.2rem;
   }
 
   .metrics{
     display:grid;
-    grid-template-columns:repeat(4,1fr);
+    grid-template-columns:repeat(3,1fr);
     gap:1rem;
     margin-top:2rem;
   }
@@ -160,10 +159,6 @@
           <h3>Pressure</h3>
           <div class="value">138 psi</div>
         </div>
-        <div class="metric" aria-label="Humidity">
-          <h3>Humidity</h3>
-          <div class="value">42%</div>
-        </div>
       </div>
     </section>
 
@@ -184,4 +179,3 @@
   </div>
 </body>
 </html>
-
