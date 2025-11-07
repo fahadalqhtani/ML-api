@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Equipment Monitoring (Live)</title>
+<title>Equipment Monitoring</title>
 <style>
   :root{
     --bg:#f6f8fb; --ink:#1f2937; --muted:#6b7280; --card:#ffffff; --ring:#e5e7eb;
@@ -21,30 +21,30 @@
   @media (max-width:980px){.wrap{grid-template-columns:1fr;height:auto;}}
 
   .panel,.alerts{ border:.1rem solid var(--ring); border-radius:var(--radius); box-shadow:var(--shadow); padding:2rem; }
-  .panel{ background:var(--card); display:flex; flex-direction:column; position:relative; }
-  .header{ display:flex; flex-direction:column; align-items:flex-start; gap:.75rem; margin-bottom:1rem; }
-  h1{ margin:0; font-weight:900; font-size:clamp(1.5rem,2.5vw,2.4rem); letter-spacing:.02em; }
+  .panel{ background:var(--card); display:flex; flex-direction:column; justify-content:space-between; position:relative; }
+  .header{ display:flex; flex-direction:column; align-items:flex-start; position:relative; margin-bottom:2rem; }
+  h1{ margin:0; font-weight:900; font-size:clamp(1.5rem,2.5vw,2.7rem); letter-spacing:.02em; }
 
-  .row{display:flex; gap:.75rem; align-items:center; flex-wrap:wrap}
   select{
-    padding:.6em 1em; border-radius:.7em; border:.1rem solid var(--ring); background:#fff; font-size:1rem; min-width:14rem;
+    padding:.6em 1em; border-radius:.7em; border:.1rem solid var(--ring); background:#fff; font-size:1rem;
+    margin-top:2.5rem; margin-left:.2rem; min-width:14rem;
   }
-  .status{ color:var(--muted); font-size:.9rem }
 
-  .metrics{ display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-top:1rem; }
+  .metrics{ display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-top:2rem; }
   @media (max-width:900px){.metrics{grid-template-columns:repeat(2,1fr);}}
   @media (max-width:500px){.metrics{grid-template-columns:1fr;}}
 
   .metric{
     background:#f3f6fb; border:.1rem solid var(--ring); border-radius:.9rem; text-align:center;
-    padding:1.2rem; min-height:8.5rem; display:flex; flex-direction:column; justify-content:space-between;
+    padding:1.4rem; min-height:10rem; display:flex; flex-direction:column; justify-content:space-between;
+    transition:transform .2s ease;
   }
-  .metric h3{margin:0;font-size:1.1rem;font-weight:700;}
-  .metric .value{font-size:1.35rem;font-weight:800;margin-top:auto;}
-  .last-time{ margin-top:.3rem; color:var(--muted); font-size:.85rem }
+  .metric:hover{transform:translateY(-.2rem);}
+  .metric h3{margin:0;font-size:1.2rem;font-weight:700;}
+  .metric .value{font-size:1.4rem;font-weight:800;margin-top:auto;}
 
   .alerts{ background:var(--alert-bg); }
-  .alerts h2{ margin:0 0 1rem; font-size:clamp(1.2rem,2vw,1.6rem); font-weight:900; }
+  .alerts h2{ margin:0 0 1rem; font-size:clamp(1.3rem,2vw,1.8rem); font-weight:900; }
   .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
   .alert.ok{ background:var(--ok); border-color:#ffd6b6; }
   .alert strong{margin-right:.4rem;}
@@ -53,187 +53,136 @@
 </head>
 <body>
   <div class="wrap">
-    <!-- LEFT -->
+    <!-- Left panel -->
     <section class="panel" aria-label="Monitoring">
       <div class="header">
         <h1>Equipment Monitoring</h1>
-        <div class="row">
-          <label>
-            <select id="deviceSelect" aria-label="Select equipment">
-              <option disabled selected>Loading devices…</option>
-            </select>
-          </label>
-          <span id="liveStatus" class="status">Connecting…</span>
-        </div>
+        <label>
+          <select id="deviceSelect" aria-label="Select equipment">
+            <option disabled selected>Loading devices…</option>
+          </select>
+        </label>
       </div>
 
       <div class="metrics">
         <div class="metric" aria-label="Temperature">
           <h3>Temperature</h3>
           <div class="value" id="tempVal">--</div>
-          <div class="last-time" id="tempTime"></div>
         </div>
         <div class="metric" aria-label="Vibration">
           <h3>Vibration</h3>
           <div class="value" id="vibVal">--</div>
-          <div class="last-time" id="vibTime"></div>
         </div>
         <div class="metric" aria-label="Pressure">
           <h3>Pressure</h3>
           <div class="value" id="presVal">--</div>
-          <div class="last-time" id="presTime"></div>
         </div>
       </div>
     </section>
 
-    <!-- RIGHT -->
+    <!-- Right panel -->
     <aside class="alerts" aria-label="Active alerts">
       <h2>Active Alerts</h2>
+
       <div class="alert ok" role="status">
         <strong>INFO:</strong> Normal operation
-        <span class="time" id="infoTime">--:--:--</span>
+        <span class="time">1:15:38 PM</span>
       </div>
+
       <div class="alert" role="status" aria-live="assertive">
-        <strong>WARNING:</strong> High vibration detected on selected device
-        <span class="time" id="warnTime">--:--:--</span>
+        <strong>WARNING:</strong> High vibration detected on Pump 101
+        <span class="time">1:15:38 PM</span>
       </div>
     </aside>
   </div>
 
-  <!-- Socket.IO client (من سيرفرك مباشرة) -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-Z4XotKqvD7Wg1MBd3b1Z9L1fH0mE5m8dM1d7D0s3y7sX78r7x1O2a4m7b4C5F6gQ" crossorigin="anonymous"></script>
-  <script>
-  // ✳️ عدّل هذا لو الـ API على دومين مختلف
-  const API_BASE = "https://ml-api-ec2k.onrender.com"; // مثال: "https://ml-api-ec2k.onrender.com"
-  const SEL = document.getElementById('deviceSelect');
-  const liveStatus = document.getElementById('liveStatus');
+<!-- Socket.IO client -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+<script>
+/* ✳️ عدّل هذا الرابط إن كان الـAPI على دومين مختلف */
+const API_BASE = ""; // مثال: "https://ml-api-ec2k.onrender.com"
 
-  const els = {
-    tempVal: document.getElementById('tempVal'),
-    vibVal:  document.getElementById('vibVal'),
-    presVal: document.getElementById('presVal'),
-    tempTime: document.getElementById('tempTime'),
-    vibTime:  document.getElementById('vibTime'),
-    presTime: document.getElementById('presTime'),
-    infoTime: document.getElementById('infoTime'),
-    warnTime: document.getElementById('warnTime'),
-  };
+const sel  = document.getElementById('deviceSelect');
+const els  = {
+  temp: document.getElementById('tempVal'),
+  vib : document.getElementById('vibVal'),
+  pres: document.getElementById('presVal'),
+};
+const fmt = {
+  temp: v => `${Number(v).toFixed(1)} °C`,
+  vib : v => `${Number(v).toFixed(2)} units`,
+  pres: v => `${Number(v).toFixed(0)} psi`,
+};
 
-  /** أدوات صغيرة */
-  const fmt = {
-    temp: v => `${Number(v).toFixed(1)} °C`,
-    vib:  v => `${Number(v).toFixed(2)} units`,
-    pres: v => `${Number(v).toFixed(0)} psi`,
-    t:    d => new Date(d).toLocaleTimeString(),
-  };
-
-  /** 1) حمّل الأجهزة من /equipment */
-  async function loadDevices() {
-    SEL.innerHTML = '<option disabled selected>Loading devices…</option>';
-    try {
-      const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' }});
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const devices = Array.isArray(json?.equipment) ? json.equipment : [];
-      SEL.innerHTML = '';
-      if (!devices.length) {
-        SEL.innerHTML = '<option disabled selected>No devices found</option>';
-        return;
-      }
-      const ph = new Option('Select a device…', '', true, true);
-      ph.disabled = true;
-      SEL.add(ph);
-      for (const name of devices) SEL.add(new Option(name, name));
-    } catch (e) {
-      console.error(e);
-      SEL.innerHTML = '<option disabled selected>Error loading devices</option>';
+/** 1) حمّل الأجهزة من /equipment */
+async function loadDevices() {
+  sel.innerHTML = '<option disabled selected>Loading devices…</option>';
+  try {
+    const res = await fetch(`${API_BASE}/equipment`, { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const devices = Array.isArray(json?.equipment) ? json.equipment : [];
+    sel.innerHTML = '';
+    if (!devices.length) {
+      sel.innerHTML = '<option disabled selected>No devices found</option>';
+      return;
     }
+    const ph = new Option('Select a device…', '', true, true);
+    ph.disabled = true;
+    sel.add(ph);
+    for (const name of devices) sel.add(new Option(name, name));
+  } catch (e) {
+    console.error('Failed to load devices:', e);
+    sel.innerHTML = '<option disabled selected>Error loading devices</option>';
   }
+}
 
-  /** 2) عند اختيار جهاز، اجلب آخر قراءة من /latest */
-  async function loadLatestFor(name) {
-    if (!name) return;
-    try {
-      const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { ok, data } = await res.json();
-      if (ok && data) {
-        els.tempVal.textContent = fmt.temp(data.temperature);
-        els.vibVal.textContent  = fmt.vib (data.vibration);
-        els.presVal.textContent = fmt.pres(data.pressure);
-
-        const ts = data.timestamp || new Date().toISOString();
-        els.tempTime.textContent = `Updated: ${fmt.t(ts)}`;
-        els.vibTime.textContent  = `Updated: ${fmt.t(ts)}`;
-        els.presTime.textContent = `Updated: ${fmt.t(ts)}`;
-        els.infoTime.textContent = fmt.t(ts);
-      }
-    } catch (e) {
-      console.error('loadLatestFor', e);
+/** 2) جلب آخر قراءة للجهاز المختار (latest) عند تغيير الـselect */
+async function fetchLatest(name){
+  try{
+    const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { ok, data } = await res.json();
+    if (ok && data) {
+      els.temp.textContent = fmt.temp(data.temperature);
+      els.vib .textContent = fmt.vib (data.vibration);
+      els.pres.textContent = fmt.pres(data.pressure);
+    } else {
+      els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
     }
+  } catch (err) {
+    console.error('latest error:', err);
   }
+}
 
-  /** 3) وصّل Socket.IO واستمع لـ reading_update */
-  let socket;
-  function connectSocket() {
-    liveStatus.textContent = 'Connecting…';
-    try {
-      socket = io(API_BASE || undefined, {
-        transports: ['websocket', 'polling'],
-        // path الافتراضي '/socket.io' — لا تغيّره إلا إذا عدّلته في السيرفر
-      });
+sel.addEventListener('change', () => {
+  const name = sel.value;
+  // نظّف العرض ثم استدعي latest مرة واحدة
+  els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+  if (name) fetchLatest(name);
+});
 
-      socket.on('connect', () => {
-        liveStatus.textContent = 'Live ✅';
-      });
-
-      socket.on('disconnect', () => {
-        liveStatus.textContent = 'Disconnected. Reconnecting…';
-      });
-
-      // 📡 يستقبل بث القراءة من السيرفر
-      socket.on('reading_update', (msg) => {
-        // msg: {equipment_name, temperature, vibration, pressure, risk_score, date}
-        const selected = SEL.value;
-        if (!selected || selected === '') return;          // لم يختَر بعد
-        if (msg.equipment_name !== selected) return;       // ليس الجهاز المختار
-
-        // حدّث القيم فقط للجهاز المختار
-        els.tempVal.textContent = fmt.temp(msg.temperature);
-        els.vibVal.textContent  = fmt.vib (msg.vibration);
-        els.presVal.textContent = fmt.pres(msg.pressure);
-
-        const ts = msg.date ? (new Date().toISOString().split('T')[0] + 'T' + msg.date) : new Date().toISOString();
-        els.tempTime.textContent = `Updated: ${fmt.t(ts)}`;
-        els.vibTime.textContent  = `Updated: ${fmt.t(ts)}`;
-        els.presTime.textContent = `Updated: ${fmt.t(ts)}`;
-        els.infoTime.textContent = fmt.t(ts);
-
-        // مثال تنبيه بسيط لو الاهتزاز عالي
-        if (Number(msg.vibration) > 5) {
-          els.warnTime.textContent = fmt.t(ts);
-        }
-      });
-
-    } catch (e) {
-      console.error('Socket connect error', e);
-      liveStatus.textContent = 'Socket error';
-    }
-  }
-
-  // أحداث الواجهة
-  SEL.addEventListener('change', (e) => {
-    const name = e.target.value;
-    if (!name) return;
-    loadLatestFor(name); // جلب آخر قراءة فور الاختيار
+/** 3) Socket.IO: استقبل push من السيرفر وحدث فقط للجهاز المختار */
+let socket;
+function connectSocket(){
+  socket = io(API_BASE || undefined, {
+    transports: ['websocket', 'polling'],
   });
+  socket.on('reading_update', (msg) => {
+    const selected = sel.value;
+    if (!selected) return;
+    if (msg.equipment_name !== selected) return; // حدّث فقط للجهاز المختار
 
-  // تشغيل
-  document.addEventListener('DOMContentLoaded', async () => {
-    await loadDevices();
-    connectSocket();
+    els.temp.textContent = fmt.temp(msg.temperature);
+    els.vib .textContent = fmt.vib (msg.vibration);
+    els.pres.textContent = fmt.pres(msg.pressure);
   });
-  </script>
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadDevices();
+  connectSocket();
+});
+</script>
 </body>
 </html>
-
