@@ -103,7 +103,7 @@
  * - إذا الصفحة تُخدَّم من نفس الدومين والباك-إند خلف نفس المسار: اتركه فارغًا "" وسيستخدم relative paths.
  * - إذا الباك-إند على Render بدومين مختلف: ضع الرابط مثل "https://ml-api-xxxx.onrender.com"
  */
-const API_BASE = ""; // مثال: "https://ml-api-ec2k.onrender.com"
+const API_BASE = "https://ml-api-ec2k.onrender.com"; // مثال: "https://ml-api-ec2k.onrender.com"
 
 /** جلب الأجهزة من /equipment وتعبئة الـ<select> */
 async function loadDevices() {
@@ -163,3 +163,4 @@ document.addEventListener('DOMContentLoaded', loadDevices);
 </script>
 </body>
 </html>
+
