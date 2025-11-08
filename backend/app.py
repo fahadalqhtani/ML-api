@@ -79,6 +79,30 @@ except Exception:
     _SHAP_OK = False
 
 # ===================================================
+# Baselines (for direction high/low)
+# ===================================================
+
+GLOBAL_BASELINE = {"temperature": None, "pressure": None, "vibration": None}
+try:
+    if Path(TEST_CSV_PATH).exists():
+        _df_base = pd.read_csv(TEST_CSV_PATH)
+        for k in ["temperature", "pressure", "vibration"]:
+            if k in _df_base.columns and _df_base[k].notna().any():
+                GLOBAL_BASELINE[k] = float(_df_base[k].median())
+except Exception:
+    # keep None if anything goes wrong
+    pass
+
+def feature_direction(feature: str, value: float) -> str:
+    """
+    Return 'high' or 'low' against a global median; falls back to 'abnormal'.
+    """
+    base = GLOBAL_BASELINE.get(feature)
+    if base is None:
+        return "abnormal"
+    return "high" if float(value) > base else "low"
+
+# ===================================================
 # Utility Functions
 # ===================================================
 
@@ -152,7 +176,6 @@ def shap_top_causes(temperature, vibration, pressure, equipment_code,
 
     positives = [(f, v) for f, v in pairs if v > 0]
     if not positives:
-        # fallback to the single most influential sensor by absolute value
         positives = sorted(pairs, key=lambda t: abs(t[1]), reverse=True)[:1]
 
     positives.sort(key=lambda t: t[1], reverse=True)
@@ -173,23 +196,28 @@ def shap_top_causes(temperature, vibration, pressure, equipment_code,
             break
     return ranked
 
-def build_warning_message_multi(device_name: str, causes: list) -> str:
+def build_warning_message_multi(device_name: str, causes: list, cur_values: dict) -> str:
     """
     Compose a clean message using 1..3 causes (no time, no 'Warning:' prefix).
     Examples:
       'High vibration detected on Pump'
-      'High vibration & high temperature detected on Pump'
-      'High vibration, high temperature & high pressure detected on Pump'
+      'High vibration and low temperature detected on Pump'
+      'High vibration, high temperature and high pressure detected on Pump'
     """
     label = {"temperature": "temperature", "vibration": "vibration", "pressure": "pressure"}
-    parts = [f"high {label.get(f, f)}" for f, _, _ in causes]
+    parts = []
+    for f, _, _ in causes:
+        direction = feature_direction(f, cur_values.get(f))
+        token = "abnormal" if direction == "abnormal" else direction
+        parts.append(f"{token} {label.get(f, f)}")
     if len(parts) == 1:
         cause_text = parts[0]
     elif len(parts) == 2:
-        cause_text = " & ".join(parts)
+        cause_text = " and ".join(parts)
     else:
-        cause_text = ", ".join(parts[:-1]) + " & " + parts[-1]
-    return f"{cause_text.capitalize()} detected on {device_name}"
+        cause_text = ", ".join(parts[:-1]) + " and " + parts[-1]
+    # Capitalize first letter only
+    return f"{cause_text[0].upper() + cause_text[1:]} detected on {device_name}"
 
 # --------------------------------------------------
 
@@ -203,7 +231,12 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
         code = equipment_code_from_name(name)
         causes = shap_top_causes(temperature, vibration, pressure, code)
         if causes:
-            message = build_warning_message_multi(name, causes)
+            cur_vals = {
+                "temperature": float(temperature),
+                "pressure": float(pressure),
+                "vibration": float(vibration),
+            }
+            message = build_warning_message_multi(name, causes, cur_vals)
 
     with engine.begin() as conn:
         # Ensure equipment exists
