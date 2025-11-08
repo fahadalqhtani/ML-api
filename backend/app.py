@@ -52,6 +52,8 @@ socketio = SocketIO(
     ping_interval=20,
     ping_timeout=30,
     path="/socket.io",
+    logger=True,          # enable for easier debugging
+    engineio_logger=True  # enable for easier debugging
 )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
@@ -90,7 +92,6 @@ try:
             if k in _df_base.columns and _df_base[k].notna().any():
                 GLOBAL_BASELINE[k] = float(_df_base[k].median())
 except Exception:
-    # keep None if anything goes wrong
     pass
 
 def feature_direction(feature: str, value: float) -> str:
@@ -216,7 +217,6 @@ def build_warning_message_multi(device_name: str, causes: list, cur_values: dict
         cause_text = " and ".join(parts)
     else:
         cause_text = ", ".join(parts[:-1]) + " and " + parts[-1]
-    # Capitalize first letter only
     return f"{cause_text[0].upper() + cause_text[1:]} detected on {device_name}"
 
 # --------------------------------------------------
@@ -239,12 +239,10 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             message = build_warning_message_multi(name, causes, cur_vals)
 
     with engine.begin() as conn:
-        # Ensure equipment exists
         conn.execute(
             text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
             {"name": name},
         )
-        # Insert reading
         reading_id = conn.execute(
             text("""
                 INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
@@ -260,7 +258,6 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         ).scalar_one()
 
-        # Insert prediction + message
         conn.execute(
             text("""
                 INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
@@ -275,7 +272,6 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         )
 
-    # Emit to frontend
     payload = {
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
@@ -294,9 +290,9 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
 
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
     """Simulate readings periodically from CSV."""
-    print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
+    print(f"Simulation starting from {csv_path} (every {interval}s)")
     if not Path(csv_path).exists():
-        print(f"⚠️ CSV not found: {csv_path}. Simulation aborted.")
+        print(f"CSV not found: {csv_path}. Simulation aborted.")
         return
 
     df = pd.read_csv(csv_path)
@@ -312,12 +308,11 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
         groups[int(code)] = itertools.cycle(g.to_dict("records"))
 
     if not groups:
-        print("⚠️ No groups found in CSV. Simulation aborted.")
+        print("No groups found in CSV. Simulation aborted.")
         return
 
     codes = sorted(groups.keys())
 
-    # Ensure devices exist
     try:
         with engine.begin() as conn:
             for code in codes:
@@ -328,7 +323,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
     except Exception as e:
         print("DB warmup error:", e)
 
-    print(f"▶️ Simulation groups: {codes} | interval={interval}s")
+    print(f"Simulation groups: {codes} | interval={interval}s")
 
     while True:
         for code in codes:
@@ -343,7 +338,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
                 upsert_and_insert_reading(name, datetime.utcnow(), temp, vib, pres, risk)
 
             except Exception as e:
-                print(f"⚠️ Simulation error for code={code}: {e}")
+                print(f"Simulation error for code={code}: {e}")
                 continue
 
         eventlet.sleep(interval)
