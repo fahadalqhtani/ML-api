@@ -109,7 +109,8 @@
     temp: v => `${Number(v).toFixed(1)} °C`,
     vib : v => `${Number(v).toFixed(2)} units`,
     pres: v => `${Number(v).toFixed(0)} psi`,
-    clock: () => new Date().toLocaleTimeString(),
+    clock: () => new Date().toLocaleTimeString('en-US', { hour12: true })
+,
   };
 
   let socket = null;
@@ -183,7 +184,8 @@
       const name = devices[idx];
       if (!data) return;
       const risk = Number(data.risk_score || 0);
-      const timeStr = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : fmt.clock();
+      const timeStr = data.timestamp ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: true })
+ : fmt.clock();
       if (risk >= RISK_THRESHOLD) {
         upsertAlert(name, timeStr, data.message);
       } else {
@@ -301,4 +303,5 @@
   </script>
 </body>
 </html>
+
 
