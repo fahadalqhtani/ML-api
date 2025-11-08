@@ -55,6 +55,8 @@ socketio = SocketIO(
     logger=True,          # enable for easier debugging
     engineio_logger=True  # enable for easier debugging
 )
+socketio.init_app(app, cors_allowed_origins="*", ping_interval=10, ping_timeout=25)
+
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
