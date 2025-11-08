@@ -127,10 +127,16 @@
       alertsList.appendChild(box);
     }
   }
+
   function upsertAlert(name, timeStr, message){
+    // Remove "Warning:" word and time from message if exists
+    if (message) {
+      message = message.replace(/^Warning:\s*/i, '').replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '').trim();
+    }
     alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
     renderAlerts();
   }
+
   function clearAlert(name){
     if (alertsMap.delete(name)) renderAlerts();
   }
@@ -205,17 +211,9 @@
       path: '/socket.io'
     });
 
-    socket.on('connect', () => {
-      console.log('[Socket] connected', socket.id);
-    });
-
-    socket.on('connect_error', (e) => {
-      console.warn('[Socket] connect_error:', e?.message||e);
-    });
-
-    socket.on('disconnect', (r) => {
-      console.warn('[Socket] disconnected:', r);
-    });
+    socket.on('connect', () => console.log('[Socket] connected', socket.id));
+    socket.on('connect_error', e => console.warn('[Socket] connect_error:', e?.message||e));
+    socket.on('disconnect', r => console.warn('[Socket] disconnected:', r));
 
     socket.on('reading_update', (msg) => {
       const selected = String(sel.value||'').trim().toLowerCase();
@@ -232,11 +230,8 @@
       const name = String(msg?.equipment_name||'').trim();
       if (!name) return;
 
-      if (risk >= RISK_THRESHOLD) {
-        upsertAlert(name, timeStr, msg?.message);
-      } else {
-        clearAlert(name);
-      }
+      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr, msg?.message);
+      else clearAlert(name);
     });
   }
 
