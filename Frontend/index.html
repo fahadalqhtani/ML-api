@@ -44,7 +44,13 @@
   .metric .value{font-size:1.4rem;font-weight:800;margin-top:auto;}
 
   .alerts{ background:var(--alert-bg); }
-  .alerts h2{ margin:0 0 1rem; font-size:clamp(1.3rem,2vw,1.8rem); font-weight:900; }
+  .alerts h2{
+  margin:0 0 1rem;
+  font-size:clamp(1.3rem,2vw,1.8rem);
+  font-weight:900;
+  text-align:center; /* ← هذا الجديد */
+}
+
   .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
   .alert strong{margin-right:.4rem;}
   .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.9rem;}
@@ -295,3 +301,4 @@
   </script>
 </body>
 </html>
+
