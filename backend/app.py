@@ -114,40 +114,84 @@ def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
         proba_faulty = float(model.predict(X)[0])
     return int(round(proba_faulty * 100))
 
-def shap_top_cause(temperature, vibration, pressure, equipment_code):
-    """Return (feature_name, contribution) of the top contributing sensor using SHAP."""
+# ---------- SHAP helpers (multi-cause) ----------
+
+def _extract_shap_values(x_row: np.ndarray):
+    """Return list of (feature, shap_value) for sensor features only."""
     if not _SHAP_OK:
-        return None, 0.0
-    x_row = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
+        return []
     exp = explainer(x_row)
     vals = getattr(exp, "values", None)
     if vals is None:
-        return None, 0.0
-
-    # Handle various SHAP output shapes
-    if vals.ndim == 3:              # (n_samples, n_features, n_classes)
+        return []
+    if vals.ndim == 3:               # (n_samples, n_features, n_classes)
         cls_idx = 1 if vals.shape[-1] > 1 else 0
         raw = vals[0, :, cls_idx]
-    elif vals.ndim == 2:            # (n_samples, n_features)
+    elif vals.ndim == 2:             # (n_samples, n_features)
         raw = vals[0, :]
-    else:                           # (n_features,)
+    else:                            # (n_features,)
         raw = vals
+    return [(f, float(v)) for f, v in zip(FEATURE_NAMES, raw.tolist()) if f in SENSOR_FEATURES]
 
-    pairs = list(zip(FEATURE_NAMES, raw.tolist()))
-    candidates = [(f, v) for f, v in pairs if f in SENSOR_FEATURES and v is not None and v > 0]
-    if not candidates:
-        candidates = [(f, v) for f, v in pairs if f in SENSOR_FEATURES and v is not None]
-        if not candidates:
-            return None, 0.0
-        candidates.sort(key=lambda t: abs(t[1]), reverse=True)
-        return candidates[0]
-    candidates.sort(key=lambda t: t[1], reverse=True)
-    return candidates[0]
+def shap_top_causes(temperature, vibration, pressure, equipment_code,
+                    min_share=0.20, coverage=0.80, max_causes=3):
+    """
+    Return a ranked list of (feature, contribution, share) for 1..3 causes.
+    - Positive SHAP values only (push towards failure).
+    - Always include top-1.
+    - Add more causes if each has share >= min_share OR cumulative share < coverage,
+      up to max_causes.
+    """
+    if not _SHAP_OK:
+        return []
 
-def build_warning_message(device_name: str, ts: datetime, top_feature: str, contrib: float) -> str:
-    """Create a human-readable warning message."""
-    tstr = ts.strftime("%I:%M:%S %p")
-    return f"Warning: high {top_feature} detected on {device_name} at {tstr}"
+    x_row = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
+    pairs = _extract_shap_values(x_row)
+    if not pairs:
+        return []
+
+    positives = [(f, v) for f, v in pairs if v > 0]
+    if not positives:
+        # fallback to the single most influential sensor by absolute value
+        positives = sorted(pairs, key=lambda t: abs(t[1]), reverse=True)[:1]
+
+    positives.sort(key=lambda t: t[1], reverse=True)
+    total_pos = sum(v for _, v in positives) or 1e-9
+
+    ranked = []
+    cum_share = 0.0
+    for i, (f, v) in enumerate(positives):
+        share = v / total_pos
+        if i == 0:
+            ranked.append((f, v, share))
+            cum_share += share
+            continue
+        if len(ranked) < max_causes and (share >= min_share or cum_share < coverage):
+            ranked.append((f, v, share))
+            cum_share += share
+        if len(ranked) >= max_causes or cum_share >= coverage:
+            break
+    return ranked
+
+def build_warning_message_multi(device_name: str, causes: list) -> str:
+    """
+    Compose a clean message using 1..3 causes (no time, no 'Warning:' prefix).
+    Examples:
+      'High vibration detected on Pump'
+      'High vibration & high temperature detected on Pump'
+      'High vibration, high temperature & high pressure detected on Pump'
+    """
+    label = {"temperature": "temperature", "vibration": "vibration", "pressure": "pressure"}
+    parts = [f"high {label.get(f, f)}" for f, _, _ in causes]
+    if len(parts) == 1:
+        cause_text = parts[0]
+    elif len(parts) == 2:
+        cause_text = " & ".join(parts)
+    else:
+        cause_text = ", ".join(parts[:-1]) + " & " + parts[-1]
+    return f"{cause_text.capitalize()} detected on {device_name}"
+
+# --------------------------------------------------
 
 def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score):
     """Insert reading + prediction into DB (with SHAP message if applicable) and emit to frontend."""
@@ -157,9 +201,9 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     message = None
     if failurety == 1:
         code = equipment_code_from_name(name)
-        top_feature, contrib = shap_top_cause(temperature, vibration, pressure, code)
-        if top_feature:
-            message = build_warning_message(name, ts, top_feature, contrib)
+        causes = shap_top_causes(temperature, vibration, pressure, code)
+        if causes:
+            message = build_warning_message_multi(name, causes)
 
     with engine.begin() as conn:
         # Ensure equipment exists
