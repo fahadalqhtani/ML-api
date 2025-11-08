@@ -222,10 +222,10 @@ def build_warning_message_multi(device_name: str, causes: list, cur_values: dict
 # --------------------------------------------------
 
 def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score):
-    """Insert reading + prediction into DB (with SHAP message if applicable) and emit to frontend."""
+    """Emit first (non-blocking), then persist in background."""
     failurety = 1 if risk_score >= RISK_THRESHOLD else 0
-    ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
+    # Prepare SHAP message (قبل الإرسال عشان تظهر في الواجهة)
     message = None
     if failurety == 1:
         code = equipment_code_from_name(name)
@@ -238,41 +238,9 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             }
             message = build_warning_message_multi(name, causes, cur_vals)
 
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
-            {"name": name},
-        )
-        reading_id = conn.execute(
-            text("""
-                INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
-                VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
-                RETURNING id
-            """),
-            {
-                "equipment_name": name,
-                "temperature": float(temperature),
-                "pressure": float(pressure),
-                "vibration": float(vibration),
-                "timestamp": ts_db,
-            },
-        ).scalar_one()
-
-        conn.execute(
-            text("""
-                INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
-                VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
-            """),
-            {
-                "reading_id": reading_id,
-                "prediction": failurety,
-                "probability": risk_score / 100.0,
-                "timestamp": ts_db,
-                "message": message,
-            },
-        )
-
+    # 1) Emit immediately (includes a seq for ordering on the client)
     payload = {
+        "seq": int(datetime.utcnow().timestamp() * 1000),  # millisecond sequence
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
         "temperature": float(temperature),
@@ -283,6 +251,52 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     if message:
         payload["message"] = message
     socketio.emit("reading_update", payload)
+
+    # 2) Persist in the background so الشبكة/الـDB ما توقف البث
+    def _persist():
+        ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with engine.begin() as conn:
+                # تأكد من وجود الجهاز
+                conn.execute(
+                    text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
+                    {"name": name},
+                )
+                # قراءة
+                reading_id = conn.execute(
+                    text("""
+                        INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
+                        VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
+                        RETURNING id
+                    """),
+                    {
+                        "equipment_name": name,
+                        "temperature": float(temperature),
+                        "pressure": float(pressure),
+                        "vibration": float(vibration),
+                        "timestamp": ts_db,
+                    },
+                ).scalar_one()
+                # تنبؤ/رسالة
+                conn.execute(
+                    text("""
+                        INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
+                        VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
+                    """),
+                    {
+                        "reading_id": reading_id,
+                        "prediction": failurety,
+                        "probability": risk_score / 100.0,
+                        "timestamp": ts_db,
+                        "message": message,
+                    },
+                )
+        except Exception as e:
+            # سجّل الخطأ فقط؛ البث سبق وانطلق
+            print(f"[DB persist error] {e}")
+
+    socketio.start_background_task(_persist)
+
 
 # ===================================================
 # Simulation
