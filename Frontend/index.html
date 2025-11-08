@@ -48,7 +48,6 @@
   .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
   .alert strong{margin-right:.4rem;}
   .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.9rem;}
-  .empty{ color:var(--muted); font-style:italic; margin-top:.5rem; }
 </style>
 </head>
 <body>
@@ -110,26 +109,26 @@
   let socket = null;
   let pollTimer = null;
   let devices = [];
-  const alertsMap = new Map(); // name -> {name, time, _ts}
+  const alertsMap = new Map(); // name -> {name, time, message, _ts}
 
-  // ======= UI: alerts =======
+  // ======= Alerts UI =======
   function renderAlerts(){
     alertsList.innerHTML = '';
     const alerts = Array.from(alertsMap.values());
-    if (!alerts.length) return; // تبقى فارغة إذا لا يوجد أي تنبيه
-    alerts.sort((a,b) => b._ts - a._ts); // الأحدث أولاً
+    if (!alerts.length) return;
+    alerts.sort((a,b) => b._ts - a._ts);
     for (const a of alerts) {
       const box = document.createElement('div');
       box.className = 'alert';
       box.innerHTML = `
-        <strong>WARNING:</strong> High failure risk detected on ${a.name}
+        <strong>WARNING:</strong> ${a.message || `High failure risk detected on ${a.name}`}
         <span class="time">${a.time}</span>
       `;
       alertsList.appendChild(box);
     }
   }
-  function upsertAlert(name, timeStr){
-    alertsMap.set(name, { name, time: timeStr, _ts: Date.now() });
+  function upsertAlert(name, timeStr, message){
+    alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
     renderAlerts();
   }
   function clearAlert(name){
@@ -150,7 +149,6 @@
     }
   }
 
-  // تحديث الكروت للجهاز المختار
   async function updateSelectedCards(){
     const name = sel.value;
     if (!name) return;
@@ -159,29 +157,35 @@
       els.temp.textContent = fmt.temp(d.temperature);
       els.vib .textContent = fmt.vib (d.vibration);
       els.pres.textContent = fmt.pres(d.pressure);
+
+      const risk = Number(d.risk_score || 0);
+      const timeStr = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : fmt.clock();
+      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr, d.message);
     }
   }
 
-  // ⚠️ لا نحذف التنبيه إذا لم تصل قراءة (null)
   async function refreshAlertsForAllDevices(){
     if (!devices.length) return;
     const results = await Promise.all(devices.map(n => fetchLatest(n)));
     results.forEach((data, idx) => {
       const name = devices[idx];
-      if (!data) return; // أبقِ التنبيه كما هو
+      if (!data) return;
       const risk = Number(data.risk_score || 0);
-      const timeStr = (data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : fmt.clock());
-      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr);
-      else clearAlert(name);
+      const timeStr = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : fmt.clock();
+      if (risk >= RISK_THRESHOLD) {
+        upsertAlert(name, timeStr, data.message);
+      } else {
+        clearAlert(name);
+      }
     });
   }
 
-  // ======= Polling (الكروت + التنبيهات) =======
+  // ======= Polling =======
   function startPolling(){
     if (pollTimer) return;
     pollTimer = setInterval(async () => {
-      await updateSelectedCards();     // ← تحديث كروت الجهاز المختار
-      await refreshAlertsForAllDevices(); // ← تحديث التنبيهات لكل الأجهزة
+      await updateSelectedCards();
+      await refreshAlertsForAllDevices();
     }, 5000);
   }
 
@@ -213,8 +217,6 @@
       console.warn('[Socket] disconnected:', r);
     });
 
-    // الكروت: حدِّث فقط إذا كان الحدث لنفس الجهاز المختار
-    // التنبيهات: حدِّث دائمًا لأي جهاز
     socket.on('reading_update', (msg) => {
       const selected = String(sel.value||'').trim().toLowerCase();
       const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
@@ -230,8 +232,11 @@
       const name = String(msg?.equipment_name||'').trim();
       if (!name) return;
 
-      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr);
-      else clearAlert(name);
+      if (risk >= RISK_THRESHOLD) {
+        upsertAlert(name, timeStr, msg?.message);
+      } else {
+        clearAlert(name);
+      }
     });
   }
 
@@ -269,7 +274,6 @@
         for (const name of devices) sel.add(new Option(name, name));
         sel.selectedIndex = 0;
 
-        // تعبئة أولية للكروت والتنبيهات
         await updateSelectedCards();
         await refreshAlertsForAllDevices();
         return;
@@ -290,8 +294,8 @@
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
-    connectSocket();  // WebSocket للتحديث الفوري
-    startPolling();   // بولينغ للكروت + التنبيهات كل 5 ثواني كشبكة أمان
+    connectSocket();
+    startPolling();
   });
   </script>
 </body>
