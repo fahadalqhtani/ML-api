@@ -20,7 +20,7 @@ from joblib import load as joblib_load
 # ===================================================
 
 def _with_sslmode_require(url: str) -> str:
-    """Ensure Postgres uses SSL on Render-like platforms."""
+    """Ensure Postgres uses SSL (required for Render and similar platforms)."""
     if not url:
         return url
     if "sslmode=" in url:
@@ -31,17 +31,12 @@ DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-MODEL_PATH     = os.getenv("MODEL_PATH", "best_rf.pkl")  # اسم ملف الموديل
-RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # %
-TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")  # بيانات السيموليشن
-SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # ثواني
+MODEL_PATH     = os.getenv("MODEL_PATH", "best_rf.pkl")
+RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
+TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
+SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # seconds
 
-# خريطة الكود إلى اسم الجهاز
-CODE_TO_NAME = {
-    0: "Compressor",
-    1: "Pump",
-    2: "Turbine",
-}
+CODE_TO_NAME = {0: "Compressor", 1: "Pump", 2: "Turbine"}
 
 # ===================================================
 # Initialize App, DB, Model
@@ -54,19 +49,37 @@ socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode="eventlet",
-    ping_interval=20,   # نبض كل 20 ثانية
-    ping_timeout=30,    # مهلة الرد 30 ثانية
+    ping_interval=20,
+    ping_timeout=30,
     path="/socket.io",
 )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 if not Path(MODEL_PATH).exists():
-    raise FileNotFoundError(f"❌ Model file not found: {MODEL_PATH}")
+    raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
 model = joblib_load(MODEL_PATH)
 
 # ===================================================
-# Utilities
+# SHAP Initialization
+# ===================================================
+
+FEATURE_NAMES = ["temperature", "pressure", "vibration", "equipment_code"]
+SENSOR_FEATURES = ["temperature", "pressure", "vibration"]
+
+try:
+    import shap
+    try:
+        explainer = shap.TreeExplainer(model)
+    except Exception:
+        explainer = shap.Explainer(model)
+    _SHAP_OK = True
+except Exception:
+    explainer = None
+    _SHAP_OK = False
+
+# ===================================================
+# Utility Functions
 # ===================================================
 
 def equipment_code_from_name(name: str) -> int:
@@ -89,7 +102,7 @@ def parse_timestamp(ts_str: str) -> datetime:
     return datetime.utcnow()
 
 def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
-    """Use trained model to produce failure probability in %."""
+    """Use the trained model to produce a failure probability in %."""
     X = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
@@ -101,18 +114,60 @@ def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
         proba_faulty = float(model.predict(X)[0])
     return int(round(proba_faulty * 100))
 
+def shap_top_cause(temperature, vibration, pressure, equipment_code):
+    """Return (feature_name, contribution) of the top contributing sensor using SHAP."""
+    if not _SHAP_OK:
+        return None, 0.0
+    x_row = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
+    exp = explainer(x_row)
+    vals = getattr(exp, "values", None)
+    if vals is None:
+        return None, 0.0
+
+    # Handle various SHAP output shapes
+    if vals.ndim == 3:              # (n_samples, n_features, n_classes)
+        cls_idx = 1 if vals.shape[-1] > 1 else 0
+        raw = vals[0, :, cls_idx]
+    elif vals.ndim == 2:            # (n_samples, n_features)
+        raw = vals[0, :]
+    else:                           # (n_features,)
+        raw = vals
+
+    pairs = list(zip(FEATURE_NAMES, raw.tolist()))
+    candidates = [(f, v) for f, v in pairs if f in SENSOR_FEATURES and v is not None and v > 0]
+    if not candidates:
+        candidates = [(f, v) for f, v in pairs if f in SENSOR_FEATURES and v is not None]
+        if not candidates:
+            return None, 0.0
+        candidates.sort(key=lambda t: abs(t[1]), reverse=True)
+        return candidates[0]
+    candidates.sort(key=lambda t: t[1], reverse=True)
+    return candidates[0]
+
+def build_warning_message(device_name: str, ts: datetime, top_feature: str, contrib: float) -> str:
+    """Create a human-readable warning message."""
+    tstr = ts.strftime("%I:%M:%S %p")
+    return f"Warning: high {top_feature} detected on {device_name} at {tstr}"
+
 def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score):
-    """Write reading+prediction to DB and notify frontend."""
+    """Insert reading + prediction into DB (with SHAP message if applicable) and emit to frontend."""
     failurety = 1 if risk_score >= RISK_THRESHOLD else 0
     ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
+    message = None
+    if failurety == 1:
+        code = equipment_code_from_name(name)
+        top_feature, contrib = shap_top_cause(temperature, vibration, pressure, code)
+        if top_feature:
+            message = build_warning_message(name, ts, top_feature, contrib)
+
     with engine.begin() as conn:
-        # تأكد من وجود الجهاز
+        # Ensure equipment exists
         conn.execute(
             text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
             {"name": name},
         )
-        # إدخال القراءة
+        # Insert reading
         reading_id = conn.execute(
             text("""
                 INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
@@ -128,39 +183,40 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             },
         ).scalar_one()
 
-        # إدخال التنبؤ
+        # Insert prediction + message
         conn.execute(
             text("""
-                INSERT INTO prediction (reading_id, prediction, probability, timestamp)
-                VALUES (:reading_id, :prediction, :probability, :timestamp)
+                INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
+                VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
             """),
             {
                 "reading_id": reading_id,
                 "prediction": failurety,
                 "probability": risk_score / 100.0,
                 "timestamp": ts_db,
+                "message": message,
             },
         )
 
-    # بث للفرونت-إند (تحديث فوري)
-    socketio.emit("reading_update", {
+    # Emit to frontend
+    payload = {
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
         "temperature": float(temperature),
         "vibration": float(vibration),
         "pressure": float(pressure),
         "risk_score": int(risk_score),
-    })
+    }
+    if message:
+        payload["message"] = message
+    socketio.emit("reading_update", payload)
 
 # ===================================================
-# Simulation: one row per equipment code every interval
+# Simulation
 # ===================================================
 
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
-    """
-    Every `interval` seconds, emit/store one reading per equipment_code group.
-    CSV columns required: temperature, pressure, vibration, equipment_code
-    """
+    """Simulate readings periodically from CSV."""
     print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
     if not Path(csv_path).exists():
         print(f"⚠️ CSV not found: {csv_path}. Simulation aborted.")
@@ -171,7 +227,6 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
     if not required.issubset(df.columns):
         raise RuntimeError(f"{csv_path} must contain columns: {required}. Found: {set(df.columns)}")
 
-    # cycles per equipment_code
     groups = {}
     for code, g in df.groupby("equipment_code"):
         g = g[["temperature", "pressure", "vibration"]].reset_index(drop=True)
@@ -185,7 +240,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 
     codes = sorted(groups.keys())
 
-    # warm-up: ensure devices exist
+    # Ensure devices exist
     try:
         with engine.begin() as conn:
             for code in codes:
@@ -226,21 +281,11 @@ def health():
 
 @app.get("/")
 def root():
-    # يُستخدم للتسخين ولفحص جاهزية الخدمة من الواجهة
-    return jsonify({"ok": True, "service": "equipment-monitoring", "socket": True}), 200
+    return jsonify({"ok": True, "service": "equipment-monitoring", "socket": True, "shap": _SHAP_OK}), 200
 
 @app.post("/ingest")
 def ingest():
-    """
-    JSON:
-    {
-      "date": "YYYY/MM/DD hh:mm[:ss]" (optional),
-      "equipment_name": "Pump",
-      "temperature": 73.4,
-      "vibration": 1.57,
-      "pressure": 29.9
-    }
-    """
+    """Receive a single reading from IoT sensor."""
     try:
         data = request.get_json(force=True)
         ts = parse_timestamp(str(data.get("date", ""))) if data.get("date") else datetime.utcnow()
@@ -287,7 +332,7 @@ def latest():
         with engine.begin() as conn:
             row = conn.execute(text("""
                 SELECT r.temperature, r.vibration, r.pressure, r.timestamp,
-                       p.probability, p.prediction
+                       p.probability, p.prediction, p.message
                 FROM reading r
                 JOIN prediction p ON p.reading_id = r.id
                 WHERE r.equipment_name = :name
@@ -305,32 +350,31 @@ def latest():
             "timestamp": row["timestamp"].isoformat(),
             "risk_score": round(float(row["probability"]) * 100),
             "prediction": int(row["prediction"]),
+            "message": row["message"],
         }
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
-# Start background simulation once (Flask 3 friendly)
+# Start Simulation
 # ===================================================
 
 _SIM_STARTED = False
 def _ensure_simulation_started():
-    """Run CSV simulation once per process (skip if DISABLE_SIM=1)."""
     global _SIM_STARTED
     if not _SIM_STARTED and os.getenv("DISABLE_SIM", "0") != "1":
+        _SHAP_STATUS = "ON" if _SHAP_OK else "OFF"
+        print(f"SHAP status: {_SHAP_STATUS}")
         _SIM_STARTED = True
         socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
 
-# ابدأ المحاكاة فور تحميل التطبيق (بديل before_first_request في Flask 3)
 _ensure_simulation_started()
 
-# Socket.IO logging helpers (اختياري)
 @socketio.on('connect')
 def on_connect():
-    print('🔌 client connected')
+    print('Client connected')
 
-# Local run
 if __name__ == "__main__":
     _ensure_simulation_started()
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
