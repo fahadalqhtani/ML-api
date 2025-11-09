@@ -1,4 +1,4 @@
-# app.py - FIXED VERSION
+# app.py
 import eventlet
 eventlet.monkey_patch()
 
@@ -32,9 +32,9 @@ if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
 MODEL_PATH     = os.getenv("MODEL_PATH", "best_rf.pkl")
-RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))
+RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
 TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
-SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))
+SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # seconds
 
 CODE_TO_NAME = {0: "Compressor", 1: "Pump", 2: "Turbine"}
 
@@ -45,18 +45,13 @@ CODE_TO_NAME = {0: "Compressor", 1: "Pump", 2: "Turbine"}
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# FIXED: Better SocketIO configuration for Render
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode="eventlet",
-    ping_interval=25,
-    ping_timeout=60,
-    logger=True,
-    engineio_logger=True,
-    # IMPORTANT: Allow both transports and let client choose
-    transports=['polling', 'websocket'],
-    allow_upgrades=True
+    ping_interval=20,
+    ping_timeout=30,
+    path="/socket.io",
 )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
@@ -95,10 +90,13 @@ try:
             if k in _df_base.columns and _df_base[k].notna().any():
                 GLOBAL_BASELINE[k] = float(_df_base[k].median())
 except Exception:
+    # keep None if anything goes wrong
     pass
 
 def feature_direction(feature: str, value: float) -> str:
-    """Return 'high' or 'low' against a global median; falls back to 'abnormal'."""
+    """
+    Return 'high' or 'low' against a global median; falls back to 'abnormal'.
+    """
     base = GLOBAL_BASELINE.get(feature)
     if base is None:
         return "abnormal"
@@ -116,7 +114,7 @@ def equipment_code_from_name(name: str) -> int:
         return 1
     if n.startswith("turbine") or n.startswith("turpin"):
         return 2
-    return 1
+    return 1  # default pump
 
 def parse_timestamp(ts_str: str) -> datetime:
     ts = ts_str.replace("-", "/").strip()
@@ -150,18 +148,24 @@ def _extract_shap_values(x_row: np.ndarray):
     vals = getattr(exp, "values", None)
     if vals is None:
         return []
-    if vals.ndim == 3:
+    if vals.ndim == 3:               # (n_samples, n_features, n_classes)
         cls_idx = 1 if vals.shape[-1] > 1 else 0
         raw = vals[0, :, cls_idx]
-    elif vals.ndim == 2:
+    elif vals.ndim == 2:             # (n_samples, n_features)
         raw = vals[0, :]
-    else:
+    else:                            # (n_features,)
         raw = vals
     return [(f, float(v)) for f, v in zip(FEATURE_NAMES, raw.tolist()) if f in SENSOR_FEATURES]
 
 def shap_top_causes(temperature, vibration, pressure, equipment_code,
                     min_share=0.20, coverage=0.80, max_causes=3):
-    """Return a ranked list of (feature, contribution, share) for 1..3 causes."""
+    """
+    Return a ranked list of (feature, contribution, share) for 1..3 causes.
+    - Positive SHAP values only (push towards failure).
+    - Always include top-1.
+    - Add more causes if each has share >= min_share OR cumulative share < coverage,
+      up to max_causes.
+    """
     if not _SHAP_OK:
         return []
 
@@ -193,7 +197,13 @@ def shap_top_causes(temperature, vibration, pressure, equipment_code,
     return ranked
 
 def build_warning_message_multi(device_name: str, causes: list, cur_values: dict) -> str:
-    """Compose a clean message using 1..3 causes."""
+    """
+    Compose a clean message using 1..3 causes (no time, no 'Warning:' prefix).
+    Examples:
+      'High vibration detected on Pump'
+      'High vibration and low temperature detected on Pump'
+      'High vibration, high temperature and high pressure detected on Pump'
+    """
     label = {"temperature": "temperature", "vibration": "vibration", "pressure": "pressure"}
     parts = []
     for f, _, _ in causes:
@@ -206,13 +216,15 @@ def build_warning_message_multi(device_name: str, causes: list, cur_values: dict
         cause_text = " and ".join(parts)
     else:
         cause_text = ", ".join(parts[:-1]) + " and " + parts[-1]
+    # Capitalize first letter only
     return f"{cause_text[0].upper() + cause_text[1:]} detected on {device_name}"
 
 # --------------------------------------------------
 
 def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score):
-    """Emit first (non-blocking), then persist in background."""
+    """Insert reading + prediction into DB (with SHAP message if applicable) and emit to frontend."""
     failurety = 1 if risk_score >= RISK_THRESHOLD else 0
+    ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
     message = None
     if failurety == 1:
@@ -226,9 +238,45 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             }
             message = build_warning_message_multi(name, causes, cur_vals)
 
-    # FIXED: Added more debugging info
+    with engine.begin() as conn:
+        # Ensure equipment exists
+        conn.execute(
+            text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
+            {"name": name},
+        )
+        # Insert reading
+        reading_id = conn.execute(
+            text("""
+                INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
+                VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
+                RETURNING id
+            """),
+            {
+                "equipment_name": name,
+                "temperature": float(temperature),
+                "pressure": float(pressure),
+                "vibration": float(vibration),
+                "timestamp": ts_db,
+            },
+        ).scalar_one()
+
+        # Insert prediction + message
+        conn.execute(
+            text("""
+                INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
+                VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
+            """),
+            {
+                "reading_id": reading_id,
+                "prediction": failurety,
+                "probability": risk_score / 100.0,
+                "timestamp": ts_db,
+                "message": message,
+            },
+        )
+
+    # Emit to frontend
     payload = {
-        "seq": int(datetime.utcnow().timestamp() * 1000),
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
         "temperature": float(temperature),
@@ -238,50 +286,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     }
     if message:
         payload["message"] = message
-    
-    # FIXED: Log emissions for debugging
-    print(f"[EMIT] reading_update: {name} - Risk: {risk_score}% - Temp: {temperature}")
-    socketio.emit("reading_update", payload, broadcast=True)
-
-    def _persist():
-        ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            with engine.begin() as conn:
-                conn.execute(
-                    text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
-                    {"name": name},
-                )
-                reading_id = conn.execute(
-                    text("""
-                        INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
-                        VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
-                        RETURNING id
-                    """),
-                    {
-                        "equipment_name": name,
-                        "temperature": float(temperature),
-                        "pressure": float(pressure),
-                        "vibration": float(vibration),
-                        "timestamp": ts_db,
-                    },
-                ).scalar_one()
-                conn.execute(
-                    text("""
-                        INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
-                        VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
-                    """),
-                    {
-                        "reading_id": reading_id,
-                        "prediction": failurety,
-                        "probability": risk_score / 100.0,
-                        "timestamp": ts_db,
-                        "message": message,
-                    },
-                )
-        except Exception as e:
-            print(f"[DB persist error] {e}")
-
-    socketio.start_background_task(_persist)
+    socketio.emit("reading_update", payload)
 
 # ===================================================
 # Simulation
@@ -289,9 +294,9 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
 
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
     """Simulate readings periodically from CSV."""
-    print(f"Simulation starting from {csv_path} (every {interval}s)")
+    print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
     if not Path(csv_path).exists():
-        print(f"CSV not found: {csv_path}. Simulation aborted.")
+        print(f"⚠️ CSV not found: {csv_path}. Simulation aborted.")
         return
 
     df = pd.read_csv(csv_path)
@@ -307,11 +312,12 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
         groups[int(code)] = itertools.cycle(g.to_dict("records"))
 
     if not groups:
-        print("No groups found in CSV. Simulation aborted.")
+        print("⚠️ No groups found in CSV. Simulation aborted.")
         return
 
     codes = sorted(groups.keys())
 
+    # Ensure devices exist
     try:
         with engine.begin() as conn:
             for code in codes:
@@ -322,7 +328,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
     except Exception as e:
         print("DB warmup error:", e)
 
-    print(f"Simulation groups: {codes} | interval={interval}s")
+    print(f"▶️ Simulation groups: {codes} | interval={interval}s")
 
     while True:
         for code in codes:
@@ -337,7 +343,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
                 upsert_and_insert_reading(name, datetime.utcnow(), temp, vib, pres, risk)
 
             except Exception as e:
-                print(f"Simulation error for code={code}: {e}")
+                print(f"⚠️ Simulation error for code={code}: {e}")
                 continue
 
         eventlet.sleep(interval)
@@ -428,20 +434,6 @@ def latest():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
-# SocketIO Events - FIXED
-# ===================================================
-
-@socketio.on('connect')
-def on_connect():
-    print(f'[SocketIO] Client connected: {request.sid}')
-    # Send a test message to confirm connection
-    socketio.emit('connection_confirmed', {'message': 'Connected successfully'}, room=request.sid)
-
-@socketio.on('disconnect')
-def on_disconnect():
-    print(f'[SocketIO] Client disconnected: {request.sid}')
-
-# ===================================================
 # Start Simulation
 # ===================================================
 
@@ -455,6 +447,10 @@ def _ensure_simulation_started():
         socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
 
 _ensure_simulation_started()
+
+@socketio.on('connect')
+def on_connect():
+    print('Client connected')
 
 if __name__ == "__main__":
     _ensure_simulation_started()
