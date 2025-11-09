@@ -45,36 +45,21 @@
 
   .alerts{ background:var(--alert-bg); }
   .alerts h2{
-    margin:0 0 1rem;
-    font-size:clamp(1.3rem,2vw,1.8rem);
-    font-weight:900;
-    text-align:center;
-  }
+  margin:0 0 1rem;
+  font-size:clamp(1.3rem,2vw,1.8rem);
+  font-weight:900;
+  text-align:center; /* ← هذا الجديد */
+}
 
   .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
   .alert strong{margin-right:.4rem;}
   .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.9rem;}
-  
-  /* Connection status indicator */
-  .status{
-    position:absolute;
-    top:2rem;
-    right:2rem;
-    padding:.5rem 1rem;
-    border-radius:.5rem;
-    font-size:.85rem;
-    font-weight:600;
-  }
-  .status.connected{background:#d1fae5;color:#065f46;}
-  .status.disconnected{background:#fee2e2;color:#991b1b;}
-  .status.polling{background:#fef3c7;color:#92400e;}
 </style>
 </head>
 <body>
   <div class="wrap">
     <!-- Left panel -->
     <section class="panel" aria-label="Monitoring">
-      <div class="status disconnected" id="statusBadge">Connecting...</div>
       <div class="header">
         <h1>Equipment Monitoring</h1>
         <label>
@@ -114,7 +99,6 @@
 
   const sel = document.getElementById('deviceSelect');
   const alertsList = document.getElementById('alertsList');
-  const statusBadge = document.getElementById('statusBadge');
 
   const els = {
     temp: document.getElementById('tempVal'),
@@ -125,21 +109,14 @@
     temp: v => `${Number(v).toFixed(1)} °C`,
     vib : v => `${Number(v).toFixed(2)} units`,
     pres: v => `${Number(v).toFixed(0)} psi`,
-    clock: () => new Date().toLocaleTimeString('en-US', { hour12: true }),
+    clock: () => new Date().toLocaleTimeString('en-US', { hour12: true })
+,
   };
 
   let socket = null;
   let pollTimer = null;
   let devices = [];
-  const alertsMap = new Map();
-
-  // ======= Status Badge =======
-  function updateStatus(status) {
-    statusBadge.className = 'status ' + status;
-    if (status === 'connected') statusBadge.textContent = 'WebSocket Connected';
-    else if (status === 'polling') statusBadge.textContent = 'Polling Mode';
-    else statusBadge.textContent = 'Disconnected';
-  }
+  const alertsMap = new Map(); // name -> {name, time, message, _ts}
 
   // ======= Alerts UI =======
   function renderAlerts(){
@@ -159,11 +136,9 @@
   }
 
   function upsertAlert(name, timeStr, message){
+    // Remove "Warning:" word and time from message if exists
     if (message) {
-      message = message
-        .replace(/^Warning:\s*/i, '')
-        .replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '')
-        .trim();
+      message = message.replace(/^Warning:\s*/i, '').replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '').trim();
     }
     alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
     renderAlerts();
@@ -173,7 +148,7 @@
     if (alertsMap.delete(name)) renderAlerts();
   }
 
-  // ======= Data fetchers (REST) =======
+  // ======= Data fetchers =======
   async function fetchLatest(name){
     try{
       const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
@@ -197,11 +172,8 @@
       els.pres.textContent = fmt.pres(d.pressure);
 
       const risk = Number(d.risk_score || 0);
-      const timeStr = d.timestamp
-        ? new Date(d.timestamp).toLocaleTimeString('en-US', { hour12: true })
-        : fmt.clock();
+      const timeStr = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : fmt.clock();
       if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr, d.message);
-      else clearAlert(name);
     }
   }
 
@@ -212,111 +184,62 @@
       const name = devices[idx];
       if (!data) return;
       const risk = Number(data.risk_score || 0);
-      const timeStr = data.timestamp
-        ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: true })
-        : fmt.clock();
-      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr, data.message);
-      else clearAlert(name);
+      const timeStr = data.timestamp ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: true })
+ : fmt.clock();
+      if (risk >= RISK_THRESHOLD) {
+        upsertAlert(name, timeStr, data.message);
+      } else {
+        clearAlert(name);
+      }
     });
   }
 
-  // ======= Polling control =======
+  // ======= Polling =======
   function startPolling(){
     if (pollTimer) return;
-    console.log('[Polling] Started');
-    updateStatus('polling');
     pollTimer = setInterval(async () => {
       await updateSelectedCards();
       await refreshAlertsForAllDevices();
     }, 5000);
   }
-  
-  function stopPolling(){
-    if (!pollTimer) return;
-    console.log('[Polling] Stopped');
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
 
-  // ======= Socket.IO - FIXED =======
+  // ======= Socket.IO =======
   function connectSocket(){
-    if (!window.io) { 
-      console.warn('Socket.IO not loaded → polling only'); 
-      startPolling();
-      return; 
-    }
+    if (!window.io) { console.warn('io() not found → polling only'); return; }
 
-    console.log('[Socket] Initializing connection to:', API_BASE);
-    
     socket = io(API_BASE, {
-      transports: ['polling', 'websocket'], // Start with polling, upgrade to websocket
-      upgrade: true,
+      withCredentials: false,
+      transports: ['websocket'],
+      upgrade: false,
+      timeout: 10000,
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 10000,
-      timeout: 20000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      path: '/socket.io'
     });
 
-    socket.on('connect', () => {
-      console.log('[Socket] ✓ Connected with ID:', socket.id);
-      console.log('[Socket] Transport:', socket.io.engine.transport.name);
-      updateStatus('connected');
-      stopPolling();
-    });
+    socket.on('connect', () => console.log('[Socket] connected', socket.id));
+    socket.on('connect_error', e => console.warn('[Socket] connect_error:', e?.message||e));
+    socket.on('disconnect', r => console.warn('[Socket] disconnected:', r));
 
-    socket.on('connection_confirmed', (data) => {
-      console.log('[Socket] Server confirmed:', data);
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.warn('[Socket] ✗ Disconnected:', reason);
-      updateStatus('disconnected');
-      startPolling();
-    });
-
-    socket.on('connect_error', (e) => {
-      console.warn('[Socket] ✗ Connection error:', e?.message || e);
-      updateStatus('disconnected');
-      if (!pollTimer) startPolling();
-    });
-
-    socket.on('reconnect', (attemptNumber) => {
-      console.log('[Socket] Reconnected after', attemptNumber, 'attempts');
-      updateStatus('connected');
-    });
-
-    socket.io.engine.on('upgrade', (transport) => {
-      console.log('[Socket] ↗ Upgraded to:', transport.name);
-    });
-
-    // FIXED: Listen for reading updates
     socket.on('reading_update', (msg) => {
-      console.log('[Socket] ← Update received:', msg);
-      
-      // Update selected device metrics
-      const selected = String(sel.value || '').trim();
-      const incoming = String(msg?.equipment_name || '').trim();
+      const selected = String(sel.value||'').trim().toLowerCase();
+      const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
 
       if (selected && incoming === selected) {
         els.temp.textContent = fmt.temp(msg.temperature);
-        els.vib.textContent = fmt.vib(msg.vibration);
+        els.vib .textContent = fmt.vib (msg.vibration);
         els.pres.textContent = fmt.pres(msg.pressure);
-        console.log('[Socket] Updated metrics for:', incoming);
       }
 
-      // Update alerts
-      const risk = Number(msg?.risk_score || 0);
+      const risk = Number(msg?.risk_score||0);
       const timeStr = msg?.date || fmt.clock();
-      const name = String(msg?.equipment_name || '').trim();
-      
-      if (name) {
-        if (risk >= RISK_THRESHOLD) {
-          upsertAlert(name, timeStr, msg?.message);
-        } else {
-          clearAlert(name);
-        }
-      }
+      const name = String(msg?.equipment_name||'').trim();
+      if (!name) return;
+
+      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr, msg?.message);
+      else clearAlert(name);
     });
   }
 
@@ -325,8 +248,7 @@
     const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
     setOpt('Loading devices…');
 
-    // Wake up server
-    try { await fetch(`${API_BASE}/health`, { mode:'cors' }); } catch {}
+    try { await fetch(`${API_BASE}/`, { mode:'cors' }); } catch {}
 
     async function fetchWithTimeout(url, ms = 9000) {
       const c = new AbortController();
@@ -357,10 +279,9 @@
 
         await updateSelectedCards();
         await refreshAlertsForAllDevices();
-        console.log('[Init] Loaded', devices.length, 'devices');
         return;
       } catch (e) {
-        console.warn(`[Init] Attempt ${i}/${maxTries} failed:`, e?.message || e);
+        console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
         setOpt(i === 1 ? 'Warming up server…' : `Retrying… (${i}/${maxTries})`);
         await new Promise(r => setTimeout(r, i * 1000));
       }
@@ -370,17 +291,16 @@
   }
 
   sel.addEventListener('change', async () => {
-    console.log('[UI] Selected device changed to:', sel.value);
     els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
     await updateSelectedCards();
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
-    console.log('[Init] Starting application...');
     await loadDevices();
     connectSocket();
-    startPolling(); // Safety fallback
+    startPolling();
   });
   </script>
 </body>
 </html>
+
