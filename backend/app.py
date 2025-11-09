@@ -1,4 +1,4 @@
-# app.py
+# app.py - FIXED VERSION
 import eventlet
 eventlet.monkey_patch()
 
@@ -32,9 +32,9 @@ if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
 MODEL_PATH     = os.getenv("MODEL_PATH", "best_rf.pkl")
-RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
+RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))
 TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
-SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # seconds
+SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))
 
 CODE_TO_NAME = {0: "Compressor", 1: "Pump", 2: "Turbine"}
 
@@ -45,18 +45,19 @@ CODE_TO_NAME = {0: "Compressor", 1: "Pump", 2: "Turbine"}
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# FIXED: Better SocketIO configuration for Render
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode="eventlet",
-    ping_interval=20,
-    ping_timeout=30,
-    path="/socket.io",
-    logger=True,          # enable for easier debugging
-    engineio_logger=True  # enable for easier debugging
+    ping_interval=25,
+    ping_timeout=60,
+    logger=True,
+    engineio_logger=True,
+    # IMPORTANT: Allow both transports and let client choose
+    transports=['polling', 'websocket'],
+    allow_upgrades=True
 )
-socketio.init_app(app, cors_allowed_origins="*", ping_interval=10, ping_timeout=25)
-
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
@@ -97,9 +98,7 @@ except Exception:
     pass
 
 def feature_direction(feature: str, value: float) -> str:
-    """
-    Return 'high' or 'low' against a global median; falls back to 'abnormal'.
-    """
+    """Return 'high' or 'low' against a global median; falls back to 'abnormal'."""
     base = GLOBAL_BASELINE.get(feature)
     if base is None:
         return "abnormal"
@@ -117,7 +116,7 @@ def equipment_code_from_name(name: str) -> int:
         return 1
     if n.startswith("turbine") or n.startswith("turpin"):
         return 2
-    return 1  # default pump
+    return 1
 
 def parse_timestamp(ts_str: str) -> datetime:
     ts = ts_str.replace("-", "/").strip()
@@ -151,24 +150,18 @@ def _extract_shap_values(x_row: np.ndarray):
     vals = getattr(exp, "values", None)
     if vals is None:
         return []
-    if vals.ndim == 3:               # (n_samples, n_features, n_classes)
+    if vals.ndim == 3:
         cls_idx = 1 if vals.shape[-1] > 1 else 0
         raw = vals[0, :, cls_idx]
-    elif vals.ndim == 2:             # (n_samples, n_features)
+    elif vals.ndim == 2:
         raw = vals[0, :]
-    else:                            # (n_features,)
+    else:
         raw = vals
     return [(f, float(v)) for f, v in zip(FEATURE_NAMES, raw.tolist()) if f in SENSOR_FEATURES]
 
 def shap_top_causes(temperature, vibration, pressure, equipment_code,
                     min_share=0.20, coverage=0.80, max_causes=3):
-    """
-    Return a ranked list of (feature, contribution, share) for 1..3 causes.
-    - Positive SHAP values only (push towards failure).
-    - Always include top-1.
-    - Add more causes if each has share >= min_share OR cumulative share < coverage,
-      up to max_causes.
-    """
+    """Return a ranked list of (feature, contribution, share) for 1..3 causes."""
     if not _SHAP_OK:
         return []
 
@@ -200,13 +193,7 @@ def shap_top_causes(temperature, vibration, pressure, equipment_code,
     return ranked
 
 def build_warning_message_multi(device_name: str, causes: list, cur_values: dict) -> str:
-    """
-    Compose a clean message using 1..3 causes (no time, no 'Warning:' prefix).
-    Examples:
-      'High vibration detected on Pump'
-      'High vibration and low temperature detected on Pump'
-      'High vibration, high temperature and high pressure detected on Pump'
-    """
+    """Compose a clean message using 1..3 causes."""
     label = {"temperature": "temperature", "vibration": "vibration", "pressure": "pressure"}
     parts = []
     for f, _, _ in causes:
@@ -227,7 +214,6 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     """Emit first (non-blocking), then persist in background."""
     failurety = 1 if risk_score >= RISK_THRESHOLD else 0
 
-    # Prepare SHAP message (قبل الإرسال عشان تظهر في الواجهة)
     message = None
     if failurety == 1:
         code = equipment_code_from_name(name)
@@ -240,9 +226,9 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             }
             message = build_warning_message_multi(name, causes, cur_vals)
 
-    # 1) Emit immediately (includes a seq for ordering on the client)
+    # FIXED: Added more debugging info
     payload = {
-        "seq": int(datetime.utcnow().timestamp() * 1000),  # millisecond sequence
+        "seq": int(datetime.utcnow().timestamp() * 1000),
         "date": ts.strftime("%H:%M:%S"),
         "equipment_name": name,
         "temperature": float(temperature),
@@ -252,19 +238,19 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     }
     if message:
         payload["message"] = message
-    socketio.emit("reading_update", payload)
+    
+    # FIXED: Log emissions for debugging
+    print(f"[EMIT] reading_update: {name} - Risk: {risk_score}% - Temp: {temperature}")
+    socketio.emit("reading_update", payload, broadcast=True)
 
-    # 2) Persist in the background so الشبكة/الـDB ما توقف البث
     def _persist():
         ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
         try:
             with engine.begin() as conn:
-                # تأكد من وجود الجهاز
                 conn.execute(
                     text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
                     {"name": name},
                 )
-                # قراءة
                 reading_id = conn.execute(
                     text("""
                         INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
@@ -279,7 +265,6 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
                         "timestamp": ts_db,
                     },
                 ).scalar_one()
-                # تنبؤ/رسالة
                 conn.execute(
                     text("""
                         INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
@@ -294,11 +279,9 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
                     },
                 )
         except Exception as e:
-            # سجّل الخطأ فقط؛ البث سبق وانطلق
             print(f"[DB persist error] {e}")
 
     socketio.start_background_task(_persist)
-
 
 # ===================================================
 # Simulation
@@ -445,6 +428,20 @@ def latest():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
+# SocketIO Events - FIXED
+# ===================================================
+
+@socketio.on('connect')
+def on_connect():
+    print(f'[SocketIO] Client connected: {request.sid}')
+    # Send a test message to confirm connection
+    socketio.emit('connection_confirmed', {'message': 'Connected successfully'}, room=request.sid)
+
+@socketio.on('disconnect')
+def on_disconnect():
+    print(f'[SocketIO] Client disconnected: {request.sid}')
+
+# ===================================================
 # Start Simulation
 # ===================================================
 
@@ -458,10 +455,6 @@ def _ensure_simulation_started():
         socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
 
 _ensure_simulation_started()
-
-@socketio.on('connect')
-def on_connect():
-    print('Client connected')
 
 if __name__ == "__main__":
     _ensure_simulation_started()
