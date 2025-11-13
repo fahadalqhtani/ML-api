@@ -45,11 +45,11 @@
 
   .alerts{ background:var(--alert-bg); }
   .alerts h2{
-  margin:0 0 1rem;
-  font-size:clamp(1.3rem,2vw,1.8rem);
-  font-weight:900;
-  text-align:center; /* ← هذا الجديد */
-}
+    margin:0 0 1rem;
+    font-size:clamp(1.3rem,2vw,1.8rem);
+    font-weight:900;
+    text-align:center;
+  }
 
   .alert{ background:var(--warn); border:.1rem solid #f6caca; border-radius:.8rem; padding:1rem 1.2rem; margin-top:1rem; }
   .alert strong{margin-right:.4rem;}
@@ -109,14 +109,14 @@
     temp: v => `${Number(v).toFixed(1)} °C`,
     vib : v => `${Number(v).toFixed(2)} units`,
     pres: v => `${Number(v).toFixed(0)} psi`,
-    clock: () => new Date().toLocaleTimeString('en-US', { hour12: true })
-,
+    clock: () => new Date().toLocaleTimeString('en-US', { hour12: true }),
   };
 
   let socket = null;
   let pollTimer = null;
   let devices = [];
-  const alertsMap = new Map(); // name -> {name, time, message, _ts}
+  let usingSocket = false;          // 👈 نستخدمه لمعرفة هل الويب سوكت شغال
+  const alertsMap = new Map();      // name -> {name, time, message, _ts}
 
   // ======= Alerts UI =======
   function renderAlerts(){
@@ -136,9 +136,11 @@
   }
 
   function upsertAlert(name, timeStr, message){
-    // Remove "Warning:" word and time from message if exists
     if (message) {
-      message = message.replace(/^Warning:\s*/i, '').replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '').trim();
+      message = message
+        .replace(/^Warning:\s*/i, '')
+        .replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '')
+        .trim();
     }
     alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
     renderAlerts();
@@ -184,8 +186,9 @@
       const name = devices[idx];
       if (!data) return;
       const risk = Number(data.risk_score || 0);
-      const timeStr = data.timestamp ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: true })
- : fmt.clock();
+      const timeStr = data.timestamp
+        ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: true })
+        : fmt.clock();
       if (risk >= RISK_THRESHOLD) {
         upsertAlert(name, timeStr, data.message);
       } else {
@@ -197,20 +200,33 @@
   // ======= Polling =======
   function startPolling(){
     if (pollTimer) return;
+    console.log('[Polling] start');
     pollTimer = setInterval(async () => {
       await updateSelectedCards();
       await refreshAlertsForAllDevices();
     }, 5000);
   }
 
+  function stopPolling(){
+    if (!pollTimer) return;
+    console.log('[Polling] stop');
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
   // ======= Socket.IO =======
   function connectSocket(){
-    if (!window.io) { console.warn('io() not found → polling only'); return; }
+    if (!window.io) {
+      console.warn('io() not found → polling only');
+      startPolling();
+      return;
+    }
 
+    console.log('[Socket] connecting...');
     socket = io(API_BASE, {
       withCredentials: false,
-      transports: ['websocket'],
-      upgrade: false,
+      // 👈 نخلي Socket.IO يحاول websocket أولاً ثم يرجع لـ polling إذا فشل
+      transports: ['websocket', 'polling'],
       timeout: 10000,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -219,9 +235,27 @@
       path: '/socket.io'
     });
 
-    socket.on('connect', () => console.log('[Socket] connected', socket.id));
-    socket.on('connect_error', e => console.warn('[Socket] connect_error:', e?.message||e));
-    socket.on('disconnect', r => console.warn('[Socket] disconnected:', r));
+    socket.on('connect', () => {
+      console.log('[Socket] connected', socket.id);
+      usingSocket = true;
+      // مدام الويب سوكت شغال ما نحتاج polling
+      stopPolling();
+    });
+
+    socket.on('connect_error', e => {
+      console.warn('[Socket] connect_error:', e?.message||e);
+      if (!usingSocket) {
+        // ما قدر يوصل بالويب سوكت → نشتغل polling
+        startPolling();
+      }
+    });
+
+    socket.on('disconnect', reason => {
+      console.warn('[Socket] disconnected:', reason);
+      usingSocket = false;
+      // إذا انقطع الويب سوكت نرجع لـ polling
+      startPolling();
+    });
 
     socket.on('reading_update', (msg) => {
       const selected = String(sel.value||'').trim().toLowerCase();
@@ -297,10 +331,13 @@
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
+
+    // نحاول نتصل بالويب سوكت أولاً
     connectSocket();
+
+    // نشغّل polling كبداية (لين ما يتصل الويب سوكت)
     startPolling();
   });
   </script>
 </body>
 </html>
-
