@@ -30,9 +30,15 @@
     margin-top:2.5rem; margin-left:.2rem; min-width:14rem;
   }
 
-  .metrics{ display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-top:2rem; }
-  @media (max-width:900px){.metrics{grid-template-columns:repeat(2,1fr);}}
-  @media (max-width:500px){.metrics{grid-template-columns:1fr;}}
+  /* ✅ عدلنا الشبكة لتدعم 4 كروت */
+  .metrics{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:1rem;
+    margin-top:2rem;
+  }
+  @media (max-width:1100px){.metrics{grid-template-columns:repeat(2,1fr);}}
+  @media (max-width:600px){.metrics{grid-template-columns:1fr;}}
 
   .metric{
     background:#f3f6fb; border:.1rem solid var(--ring); border-radius:.9rem; text-align:center;
@@ -82,6 +88,11 @@
           <h3>Pressure</h3>
           <div class="value" id="presVal">--</div>
         </div>
+        <!-- ✅ كرت الرطوبة الجديد -->
+        <div class="metric" aria-label="Humidity">
+          <h3>Humidity</h3>
+          <div class="value" id="humVal">--</div>
+        </div>
       </div>
     </section>
 
@@ -104,19 +115,21 @@
     temp: document.getElementById('tempVal'),
     vib : document.getElementById('vibVal'),
     pres: document.getElementById('presVal'),
+    hum : document.getElementById('humVal'),   // ✅
   };
   const fmt = {
     temp: v => `${Number(v).toFixed(1)} °C`,
     vib : v => `${Number(v).toFixed(2)} units`,
     pres: v => `${Number(v).toFixed(0)} psi`,
+    hum : v => `${Number(v).toFixed(1)} %`,      // ✅ تنسيق الرطوبة
     clock: () => new Date().toLocaleTimeString('en-US', { hour12: true }),
   };
 
   let socket = null;
   let pollTimer = null;
   let devices = [];
-  let usingSocket = false;          // هل نحن حالياً على WebSocket؟
-  const alertsMap = new Map();      // name -> {name, time, message, _ts}
+  let usingSocket = false;
+  const alertsMap = new Map();
 
   // ======= Alerts UI =======
   function renderAlerts(){
@@ -173,6 +186,9 @@
       els.temp.textContent = fmt.temp(d.temperature);
       els.vib .textContent = fmt.vib (d.vibration);
       els.pres.textContent = fmt.pres(d.pressure);
+      if (d.humidity !== undefined) {
+        els.hum.textContent  = fmt.hum(d.humidity);   // ✅
+      }
 
       const risk = Number(d.risk_score || 0);
       const timeStr = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : fmt.clock();
@@ -227,7 +243,7 @@
     console.log('[Socket] connecting...');
     socket = io(API_BASE, {
       withCredentials: false,
-      transports: ['websocket', 'polling'],   // جرّب websocket ثم ارجع لـ polling تلقائياً
+      transports: ['websocket', 'polling'],
       timeout: 10000,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -239,19 +255,16 @@
     socket.on('connect', () => {
       console.log('[Socket] connected', socket.id);
       usingSocket = true;
-      // ❌ ما نوقف polling — نخليه شغال دائماً كـ backup
     });
 
     socket.on('connect_error', e => {
       console.warn('[Socket] connect_error:', e?.message||e);
       usingSocket = false;
-      // polling أصلاً شغال، ما يحتاج نسوي شيء زيادة
     });
 
     socket.on('disconnect', reason => {
       console.warn('[Socket] disconnected:', reason);
       usingSocket = false;
-      // لو انقطع السوكت، polling لازال شغال
     });
 
     socket.on('reading_update', (msg) => {
@@ -260,12 +273,14 @@
       const selected = String(sel.value || '').trim().toLowerCase();
       const incoming = String(msg?.equipment_name || '').trim().toLowerCase();
 
-      // حدِّث الكروت فقط إذا الجهاز المرسل يساوي الجهاز المختار
       if (selected && incoming === selected) {
         console.log('[Socket] update cards for', msg.equipment_name);
         els.temp.textContent = fmt.temp(msg.temperature);
         els.vib .textContent = fmt.vib (msg.vibration);
         els.pres.textContent = fmt.pres(msg.pressure);
+        if (msg.humidity !== undefined) {
+          els.hum.textContent  = fmt.hum(msg.humidity);   // ✅
+        }
       } else {
         console.log('[Socket] message for other device:', msg.equipment_name, 'while selected=', sel.value);
       }
@@ -318,7 +333,6 @@
         for (const name of devices) sel.add(new Option(name, name));
         sel.selectedIndex = 0;
 
-        // أول تحميل
         await updateSelectedCards('initial');
         await refreshAlertsForAllDevices('initial');
         return;
@@ -333,17 +347,13 @@
   }
 
   sel.addEventListener('change', async () => {
-    els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
+    els.temp.textContent = els.vib.textContent = els.pres.textContent = els.hum.textContent = '--';
     await updateSelectedCards('select-change');
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
-
-    // WebSocket
     connectSocket();
-
-    // Polling دايمًا شغال كباك أب
     startPolling();
   });
   </script>
