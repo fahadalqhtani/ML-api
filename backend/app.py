@@ -31,7 +31,8 @@ DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-MODEL_PATH     = os.getenv("MODEL_PATH", "best_rf.pkl")
+# ✅ استخدم مودل ExtraTrees المدرَّب
+MODEL_PATH     = os.getenv("MODEL_PATH", "best_extratrees.pkl")
 RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
 TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
 SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # seconds
@@ -64,8 +65,9 @@ model = joblib_load(MODEL_PATH)
 # SHAP Initialization
 # ===================================================
 
-FEATURE_NAMES = ["temperature", "pressure", "vibration", "equipment_code"]
-SENSOR_FEATURES = ["temperature", "pressure", "vibration"]
+# ✅ أضفنا humidity إلى قائمة الفيتشر
+FEATURE_NAMES = ["temperature", "pressure", "vibration", "humidity", "equipment_code"]
+SENSOR_FEATURES = ["temperature", "pressure", "vibration", "humidity"]
 
 try:
     import shap
@@ -82,11 +84,16 @@ except Exception:
 # Baselines (for direction high/low)
 # ===================================================
 
-GLOBAL_BASELINE = {"temperature": None, "pressure": None, "vibration": None}
+GLOBAL_BASELINE = {
+    "temperature": None,
+    "pressure": None,
+    "vibration": None,
+    "humidity": None,
+}
 try:
     if Path(TEST_CSV_PATH).exists():
         _df_base = pd.read_csv(TEST_CSV_PATH)
-        for k in ["temperature", "pressure", "vibration"]:
+        for k in ["temperature", "pressure", "vibration", "humidity"]:
             if k in _df_base.columns and _df_base[k].notna().any():
                 GLOBAL_BASELINE[k] = float(_df_base[k].median())
 except Exception:
@@ -125,9 +132,13 @@ def parse_timestamp(ts_str: str) -> datetime:
             pass
     return datetime.utcnow()
 
-def compute_risk_score(temperature, vibration, pressure, equipment_code) -> int:
+# ✅ الآن المودل يستقبل 5 فيتشر (نفس ترتيب الداتا: temp, pressure, vibration, humidity, code)
+def compute_risk_score(temperature, vibration, pressure, humidity, equipment_code) -> int:
     """Use the trained model to produce a failure probability in %."""
-    X = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
+    X = np.array(
+        [[float(temperature), float(pressure), float(vibration), float(humidity), int(equipment_code)]],
+        dtype=float
+    )
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
     elif hasattr(model, "decision_function"):
@@ -157,19 +168,18 @@ def _extract_shap_values(x_row: np.ndarray):
         raw = vals
     return [(f, float(v)) for f, v in zip(FEATURE_NAMES, raw.tolist()) if f in SENSOR_FEATURES]
 
-def shap_top_causes(temperature, vibration, pressure, equipment_code,
+def shap_top_causes(temperature, vibration, pressure, humidity, equipment_code,
                     min_share=0.20, coverage=0.80, max_causes=3):
     """
     Return a ranked list of (feature, contribution, share) for 1..3 causes.
-    - Positive SHAP values only (push towards failure).
-    - Always include top-1.
-    - Add more causes if each has share >= min_share OR cumulative share < coverage,
-      up to max_causes.
     """
     if not _SHAP_OK:
         return []
 
-    x_row = np.array([[float(temperature), float(pressure), float(vibration), int(equipment_code)]], dtype=float)
+    x_row = np.array(
+        [[float(temperature), float(pressure), float(vibration), float(humidity), int(equipment_code)]],
+        dtype=float
+    )
     pairs = _extract_shap_values(x_row)
     if not pairs:
         return []
@@ -199,12 +209,13 @@ def shap_top_causes(temperature, vibration, pressure, equipment_code,
 def build_warning_message_multi(device_name: str, causes: list, cur_values: dict) -> str:
     """
     Compose a clean message using 1..3 causes (no time, no 'Warning:' prefix).
-    Examples:
-      'High vibration detected on Pump'
-      'High vibration and low temperature detected on Pump'
-      'High vibration, high temperature and high pressure detected on Pump'
     """
-    label = {"temperature": "temperature", "vibration": "vibration", "pressure": "pressure"}
+    label = {
+        "temperature": "temperature",
+        "vibration": "vibration",
+        "pressure": "pressure",
+        "humidity": "humidity",
+    }
     parts = []
     for f, _, _ in causes:
         direction = feature_direction(f, cur_values.get(f))
@@ -216,12 +227,11 @@ def build_warning_message_multi(device_name: str, causes: list, cur_values: dict
         cause_text = " and ".join(parts)
     else:
         cause_text = ", ".join(parts[:-1]) + " and " + parts[-1]
-    # Capitalize first letter only
     return f"{cause_text[0].upper() + cause_text[1:]} detected on {device_name}"
 
 # --------------------------------------------------
 
-def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score):
+def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score):
     """Insert reading + prediction into DB (with SHAP message if applicable) and emit to frontend."""
     failurety = 1 if risk_score >= RISK_THRESHOLD else 0
     ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
@@ -229,12 +239,13 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
     message = None
     if failurety == 1:
         code = equipment_code_from_name(name)
-        causes = shap_top_causes(temperature, vibration, pressure, code)
+        causes = shap_top_causes(temperature, vibration, pressure, humidity, code)
         if causes:
             cur_vals = {
                 "temperature": float(temperature),
                 "pressure": float(pressure),
                 "vibration": float(vibration),
+                "humidity": float(humidity),
             }
             message = build_warning_message_multi(name, causes, cur_vals)
 
@@ -244,11 +255,11 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
             text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
             {"name": name},
         )
-        # Insert reading
+        # ✅ Insert reading مع humidity
         reading_id = conn.execute(
             text("""
-                INSERT INTO reading (equipment_name, temperature, pressure, vibration, timestamp)
-                VALUES (:equipment_name, :temperature, :pressure, :vibration, :timestamp)
+                INSERT INTO reading (equipment_name, temperature, pressure, vibration, humidity, timestamp)
+                VALUES (:equipment_name, :temperature, :pressure, :vibration, :humidity, :timestamp)
                 RETURNING id
             """),
             {
@@ -256,6 +267,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
                 "temperature": float(temperature),
                 "pressure": float(pressure),
                 "vibration": float(vibration),
+                "humidity": float(humidity),
                 "timestamp": ts_db,
             },
         ).scalar_one()
@@ -282,6 +294,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_s
         "temperature": float(temperature),
         "vibration": float(vibration),
         "pressure": float(pressure),
+        "humidity": float(humidity),
         "risk_score": int(risk_score),
     }
     if message:
@@ -300,13 +313,14 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
         return
 
     df = pd.read_csv(csv_path)
-    required = {"temperature", "pressure", "vibration", "equipment_code"}
+    # ✅ الآن نتوقع humidity أيضاً
+    required = {"temperature", "pressure", "vibration", "humidity", "equipment_code"}
     if not required.issubset(df.columns):
         raise RuntimeError(f"{csv_path} must contain columns: {required}. Found: {set(df.columns)}")
 
     groups = {}
     for code, g in df.groupby("equipment_code"):
-        g = g[["temperature", "pressure", "vibration"]].reset_index(drop=True)
+        g = g[["temperature", "pressure", "vibration", "humidity"]].reset_index(drop=True)
         if len(g) == 0:
             continue
         groups[int(code)] = itertools.cycle(g.to_dict("records"))
@@ -338,9 +352,10 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
                 temp = float(sample["temperature"])
                 pres = float(sample["pressure"])
                 vib  = float(sample["vibration"])
+                hum  = float(sample["humidity"])
 
-                risk = compute_risk_score(temp, vib, pres, code)
-                upsert_and_insert_reading(name, datetime.utcnow(), temp, vib, pres, risk)
+                risk = compute_risk_score(temp, vib, pres, hum, code)
+                upsert_and_insert_reading(name, datetime.utcnow(), temp, vib, pres, hum, risk)
 
             except Exception as e:
                 print(f"⚠️ Simulation error for code={code}: {e}")
@@ -355,7 +370,6 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 @app.get("/health")
 def health():
     return "OK", 200
-from sqlalchemy import text
 
 @socketio.on('connect')
 def on_connect():
@@ -384,12 +398,13 @@ def ingest():
         temperature = float(data["temperature"])
         vibration = float(data["vibration"])
         pressure = float(data["pressure"])
+        humidity = float(data["humidity"])   # ✅ حقل جديد قادم من الـ ESP32/الفرونت
         code = equipment_code_from_name(name)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Invalid input: {e}"}), 400
 
-    risk_score = compute_risk_score(temperature, vibration, pressure, code)
-    upsert_and_insert_reading(name, ts, temperature, vibration, pressure, risk_score)
+    risk_score = compute_risk_score(temperature, vibration, pressure, humidity, code)
+    upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score)
 
     return jsonify({
         "ok": True,
@@ -399,6 +414,7 @@ def ingest():
             "temperature": temperature,
             "vibration": vibration,
             "pressure": pressure,
+            "humidity": humidity,
             "risk_score": risk_score,
             "failurety": 1 if risk_score >= RISK_THRESHOLD else 0
         }
@@ -422,7 +438,7 @@ def latest():
     try:
         with engine.begin() as conn:
             row = conn.execute(text("""
-                SELECT r.temperature, r.vibration, r.pressure, r.timestamp,
+                SELECT r.temperature, r.vibration, r.pressure, r.humidity, r.timestamp,
                        p.probability, p.prediction, p.message
                 FROM reading r
                 JOIN prediction p ON p.reading_id = r.id
@@ -438,6 +454,7 @@ def latest():
             "temperature": float(row["temperature"]),
             "vibration": float(row["vibration"]),
             "pressure": float(row["pressure"]),
+            "humidity": float(row["humidity"]),
             "timestamp": row["timestamp"].isoformat(),
             "risk_score": round(float(row["probability"]) * 100),
             "prediction": int(row["prediction"]),
@@ -461,11 +478,6 @@ def _ensure_simulation_started():
         socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
 
 _ensure_simulation_started()
-
-
-
-   
-
 
 if __name__ == "__main__":
     _ensure_simulation_started()
