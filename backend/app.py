@@ -357,6 +357,10 @@ def health():
     return "OK", 200
 from sqlalchemy import text
 
+@socketio.on('connect')
+def on_connect():
+    print('Client connected')
+
 @app.get("/db-test")
 def db_test():
     with engine.connect() as conn:
@@ -458,20 +462,9 @@ def _ensure_simulation_started():
 
 _ensure_simulation_started()
 
-@socketio.on('connect')
-def on_connect():
-    print('Client connected')
 
-    # 🚨 رسالة تجريبية ترسل فور ما المتصفح يتصل
-    payload = {
-        "date": datetime.utcnow().strftime("%H:%M:%S"),
-        "equipment_name": "Pump",
-        "temperature": 77.7,
-        "vibration": 0.77,
-        "pressure": 33.3,
-        "risk_score": 92,
-    }
-    socketio.emit("reading_update", payload)
+
+   
 
 
 if __name__ == "__main__":
