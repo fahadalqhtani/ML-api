@@ -227,7 +227,7 @@
     console.log('[Socket] connecting...');
     socket = io(API_BASE, {
       withCredentials: false,
-      transports: ['websocket', 'polling'],   // جرّب websocket ثم ارجع لـ polling
+      transports: ['websocket', 'polling'],   // جرّب websocket ثم ارجع لـ polling تلقائياً
       timeout: 10000,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -239,22 +239,19 @@
     socket.on('connect', () => {
       console.log('[Socket] connected', socket.id);
       usingSocket = true;
-      stopPolling();    // مدام الويب سوكت شغال نوقف polling
+      // ❌ ما نوقف polling — نخليه شغال دائماً كـ backup
     });
 
     socket.on('connect_error', e => {
       console.warn('[Socket] connect_error:', e?.message||e);
-      if (!usingSocket) {
-        // ما قدر يوصل بالويب سوكت → نشتغل polling
-        startPolling();
-      }
+      usingSocket = false;
+      // polling أصلاً شغال، ما يحتاج نسوي شيء زيادة
     });
 
     socket.on('disconnect', reason => {
       console.warn('[Socket] disconnected:', reason);
       usingSocket = false;
-      // إذا انقطع الويب سوكت نرجع لـ polling
-      startPolling();
+      // لو انقطع السوكت، polling لازال شغال
     });
 
     socket.on('reading_update', (msg) => {
@@ -263,7 +260,7 @@
       const selected = String(sel.value || '').trim().toLowerCase();
       const incoming = String(msg?.equipment_name || '').trim().toLowerCase();
 
-      // ✅ حدِّث الكروت فقط إذا الجهاز المرسل يساوي الجهاز المختار
+      // حدِّث الكروت فقط إذا الجهاز المرسل يساوي الجهاز المختار
       if (selected && incoming === selected) {
         console.log('[Socket] update cards for', msg.equipment_name);
         els.temp.textContent = fmt.temp(msg.temperature);
@@ -321,7 +318,7 @@
         for (const name of devices) sel.add(new Option(name, name));
         sel.selectedIndex = 0;
 
-        // أول تحميل: استخدم polling style (HTTP) مرة وحدة
+        // أول تحميل
         await updateSelectedCards('initial');
         await refreshAlertsForAllDevices('initial');
         return;
@@ -343,10 +340,10 @@
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
 
-    // نحاول نتصل بالويب سوكت أولاً
+    // WebSocket
     connectSocket();
 
-    // نشغّل polling كبداية (لين ما يتصل الويب سوكت)
+    // Polling دايمًا شغال كباك أب
     startPolling();
   });
   </script>
