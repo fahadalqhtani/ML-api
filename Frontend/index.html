@@ -258,23 +258,25 @@
     });
 
     socket.on('reading_update', (msg) => {
-      const selected = String(sel.value||'').trim().toLowerCase();
-      const incoming = String(msg?.equipment_name||'').trim().toLowerCase();
+    console.log('[Socket] reading_update:', msg);  // 👈 مهم جداً
+  
+    // مؤقتًا: حدّث الكروت لأي رسالة بدون شرط المطابقة
+    els.temp.textContent = fmt.temp(msg.temperature);
+    els.vib .textContent = fmt.vib (msg.vibration);
+    els.pres.textContent = fmt.pres(msg.pressure);
+  
+    const risk = Number(msg?.risk_score || 0);
+    const timeStr = msg?.date || fmt.clock();
+    const name = String(msg?.equipment_name || '').trim();
+    if (!name) return;
+  
+    if (risk >= RISK_THRESHOLD) {
+      upsertAlert(name, timeStr, msg?.message);
+    } else {
+      clearAlert(name);
+    }
+  });
 
-      if (selected && incoming === selected) {
-        els.temp.textContent = fmt.temp(msg.temperature);
-        els.vib .textContent = fmt.vib (msg.vibration);
-        els.pres.textContent = fmt.pres(msg.pressure);
-      }
-
-      const risk = Number(msg?.risk_score||0);
-      const timeStr = msg?.date || fmt.clock();
-      const name = String(msg?.equipment_name||'').trim();
-      if (!name) return;
-
-      if (risk >= RISK_THRESHOLD) upsertAlert(name, timeStr, msg?.message);
-      else clearAlert(name);
-    });
   }
 
   // ======= Boot =======
@@ -341,3 +343,4 @@
   </script>
 </body>
 </html>
+
