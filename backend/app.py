@@ -355,6 +355,16 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 @app.get("/health")
 def health():
     return "OK", 200
+from sqlalchemy import text
+
+@app.get("/db-test")
+def db_test():
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT current_database(), inet_server_addr();")
+        )
+        db_name, host_ip = result.fetchone()
+    return {"db_name": db_name, "host_ip": str(host_ip)}
 
 @app.get("/")
 def root():
