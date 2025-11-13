@@ -115,7 +115,7 @@
   let socket = null;
   let pollTimer = null;
   let devices = [];
-  let usingSocket = false;          // 👈 نستخدمه لمعرفة هل الويب سوكت شغال
+  let usingSocket = false;          // هل نحن حالياً على WebSocket؟
   const alertsMap = new Map();      // name -> {name, time, message, _ts}
 
   // ======= Alerts UI =======
@@ -164,11 +164,12 @@
     }
   }
 
-  async function updateSelectedCards(){
+  async function updateSelectedCards(source = 'poll'){
     const name = sel.value;
     if (!name) return;
     const d = await fetchLatest(name);
     if (d){
+      console.log(`[${source}] updateSelectedCards for`, name, d);
       els.temp.textContent = fmt.temp(d.temperature);
       els.vib .textContent = fmt.vib (d.vibration);
       els.pres.textContent = fmt.pres(d.pressure);
@@ -179,7 +180,7 @@
     }
   }
 
-  async function refreshAlertsForAllDevices(){
+  async function refreshAlertsForAllDevices(source = 'poll'){
     if (!devices.length) return;
     const results = await Promise.all(devices.map(n => fetchLatest(n)));
     results.forEach((data, idx) => {
@@ -190,6 +191,7 @@
         ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: true })
         : fmt.clock();
       if (risk >= RISK_THRESHOLD) {
+        console.log(`[${source}] alert for`, name, data);
         upsertAlert(name, timeStr, data.message);
       } else {
         clearAlert(name);
@@ -202,8 +204,8 @@
     if (pollTimer) return;
     console.log('[Polling] start');
     pollTimer = setInterval(async () => {
-      await updateSelectedCards();
-      await refreshAlertsForAllDevices();
+      await updateSelectedCards('poll');
+      await refreshAlertsForAllDevices('poll');
     }, 5000);
   }
 
@@ -225,8 +227,7 @@
     console.log('[Socket] connecting...');
     socket = io(API_BASE, {
       withCredentials: false,
-      // 👈 نخلي Socket.IO يحاول websocket أولاً ثم يرجع لـ polling إذا فشل
-      transports: ['websocket', 'polling'],
+      transports: ['websocket', 'polling'],   // جرّب websocket ثم ارجع لـ polling
       timeout: 10000,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -238,8 +239,7 @@
     socket.on('connect', () => {
       console.log('[Socket] connected', socket.id);
       usingSocket = true;
-      // مدام الويب سوكت شغال ما نحتاج polling
-      stopPolling();
+      stopPolling();    // مدام الويب سوكت شغال نوقف polling
     });
 
     socket.on('connect_error', e => {
@@ -258,24 +258,32 @@
     });
 
     socket.on('reading_update', (msg) => {
-    console.log('[Socket] reading_update:', msg);  // 👈 مهم جداً
-  
-    // مؤقتًا: حدّث الكروت لأي رسالة بدون شرط المطابقة
-    els.temp.textContent = fmt.temp(msg.temperature);
-    els.vib .textContent = fmt.vib (msg.vibration);
-    els.pres.textContent = fmt.pres(msg.pressure);
-  
-    const risk = Number(msg?.risk_score || 0);
-    const timeStr = msg?.date || fmt.clock();
-    const name = String(msg?.equipment_name || '').trim();
-    if (!name) return;
-  
-    if (risk >= RISK_THRESHOLD) {
-      upsertAlert(name, timeStr, msg?.message);
-    } else {
-      clearAlert(name);
-    }
-  });
+      console.log('[Socket] reading_update:', msg);
+
+      const selected = String(sel.value || '').trim().toLowerCase();
+      const incoming = String(msg?.equipment_name || '').trim().toLowerCase();
+
+      // ✅ حدِّث الكروت فقط إذا الجهاز المرسل يساوي الجهاز المختار
+      if (selected && incoming === selected) {
+        console.log('[Socket] update cards for', msg.equipment_name);
+        els.temp.textContent = fmt.temp(msg.temperature);
+        els.vib .textContent = fmt.vib (msg.vibration);
+        els.pres.textContent = fmt.pres(msg.pressure);
+      } else {
+        console.log('[Socket] message for other device:', msg.equipment_name, 'while selected=', sel.value);
+      }
+
+      const risk = Number(msg?.risk_score || 0);
+      const timeStr = msg?.date || fmt.clock();
+      const name = String(msg?.equipment_name || '').trim();
+      if (!name) return;
+
+      if (risk >= RISK_THRESHOLD) {
+        upsertAlert(name, timeStr, msg?.message);
+      } else {
+        clearAlert(name);
+      }
+    });
 
   }
 
@@ -313,8 +321,9 @@
         for (const name of devices) sel.add(new Option(name, name));
         sel.selectedIndex = 0;
 
-        await updateSelectedCards();
-        await refreshAlertsForAllDevices();
+        // أول تحميل: استخدم polling style (HTTP) مرة وحدة
+        await updateSelectedCards('initial');
+        await refreshAlertsForAllDevices('initial');
         return;
       } catch (e) {
         console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
@@ -328,7 +337,7 @@
 
   sel.addEventListener('change', async () => {
     els.temp.textContent = els.vib.textContent = els.pres.textContent = '--';
-    await updateSelectedCards();
+    await updateSelectedCards('select-change');
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
@@ -343,4 +352,3 @@
   </script>
 </body>
 </html>
-
