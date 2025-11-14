@@ -31,13 +31,27 @@
     background:var(--card); display:flex; flex-direction:column;
     justify-content:space-between; position:relative;
   }
+
+  /* ===== header (العنوان + السيلكت + الزر) ===== */
   .header{
-    display:flex; flex-direction:row; align-items:center;
-    justify-content:space-between; gap:1rem; margin-bottom:2rem;
+    display:flex;
+    flex-direction:row;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:1rem;
+    margin-bottom:2rem;
   }
+
   h1{
     margin:0; font-weight:900;
     font-size:clamp(1.5rem,2.5vw,2.7rem); letter-spacing:.02em;
+  }
+
+  /* العنوان + السيلكت تحت بعض */
+  .title-group{
+    display:flex;
+    flex-direction:column;
+    gap:0.75rem;
   }
 
   select{
@@ -110,16 +124,16 @@
     <!-- Left panel -->
     <section class="panel" aria-label="Monitoring">
       <div class="header">
-        <h1>Equipment Monitoring</h1>
-
-        <!-- زر تشغيل / إيقاف السيموليشن -->
-        <button id="simBtn" type="button">Start Simulation</button>
-
-        <label>
+        <!-- ✅ العنوان + السيلكت -->
+        <div class="title-group">
+          <h1>Equipment Monitoring</h1>
           <select id="deviceSelect" aria-label="Select equipment">
             <option disabled selected>Loading devices…</option>
           </select>
-        </label>
+        </div>
+
+        <!-- ✅ الزر في الجهة اليمنى -->
+        <button id="simBtn" type="button">Start Simulation</button>
       </div>
 
       <div class="metrics">
@@ -214,7 +228,7 @@
       const box = document.createElement('div');
       box.className = 'alert';
       box.innerHTML = `
-        <strong>WARNING:</strong> ${a.message || `High failure risk detected on ${a.name}`}
+        <strong>WARNING:</strong> ${a.message || \`High failure risk detected on \${a.name}\`}
         <span class="time">${a.time}</span>
       `;
       alertsList.appendChild(box);
