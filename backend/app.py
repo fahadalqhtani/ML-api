@@ -306,20 +306,31 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
 _SIM_TASK = None
 _SIM_RUNNING = False
 
-def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
-    """Simulate readings periodically from CSV (يتوقف إذا _SIM_RUNNING = False)."""
-    global _SIM_RUNNING
-    print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
+# ✅ نحتفظ بالـ cycles عالميًا عشان تكمل من حيث توقفت
+_SIM_GROUPS = {}   # code -> itertools.cycle([...])
+_SIM_CODES  = []   # list of codes المتاحة
+
+def _init_sim_groups(csv_path: str = TEST_CSV_PATH):
+    """Load CSV and prepare global cycles once (for resume)."""
+    global _SIM_GROUPS, _SIM_CODES
+
+    if _SIM_GROUPS:
+        # سبق الإعداد → لا تعِد التحميل، نستخدم نفس الـ cycles
+        return
+
+    print(f"📄 Initializing simulation groups from: {csv_path}")
     if not Path(csv_path).exists():
-        print(f"⚠️ CSV not found: {csv_path}. Simulation aborted.")
-        _SIM_RUNNING = False
+        print(f"⚠️ CSV not found: {csv_path}. Cannot initialize simulation groups.")
+        _SIM_GROUPS = {}
+        _SIM_CODES = []
         return
 
     df = pd.read_csv(csv_path)
     required = {"temperature", "pressure", "vibration", "humidity", "equipment_code"}
     if not required.issubset(df.columns):
         print(f"❌ CSV missing required columns. Found: {set(df.columns)}")
-        _SIM_RUNNING = False
+        _SIM_GROUPS = {}
+        _SIM_CODES = []
         return
 
     groups = {}
@@ -330,16 +341,18 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
         groups[int(code)] = itertools.cycle(g.to_dict("records"))
 
     if not groups:
-        print("⚠️ No groups found in CSV. Simulation aborted.")
-        _SIM_RUNNING = False
+        print("⚠️ No groups found in CSV. Cannot initialize simulation groups.")
+        _SIM_GROUPS = {}
+        _SIM_CODES = []
         return
 
-    codes = sorted(groups.keys())
+    _SIM_GROUPS = groups
+    _SIM_CODES = sorted(groups.keys())
 
-    # Ensure devices exist
+    # Ensure devices exist once
     try:
         with engine.begin() as conn:
-            for code in codes:
+            for code in _SIM_CODES:
                 conn.execute(
                     text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
                     {"name": CODE_TO_NAME.get(code, f"device_{code}")},
@@ -347,14 +360,31 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
     except Exception as e:
         print("DB warmup error:", e)
 
-    print(f"▶️ Simulation groups: {codes} | interval={interval}s")
+    print(f"✅ Simulation groups ready: codes={_SIM_CODES}")
+
+def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
+    """Simulate readings periodically from CSV (يتوقف إذا _SIM_RUNNING = False).
+
+    يستخدم global cycles حتى لو وقفنا التشغيل ثم شغلناه يكمل من آخر نقطة.
+    """
+    global _SIM_RUNNING, _SIM_GROUPS, _SIM_CODES
+
+    print(f"📡 Simulation loop starting (interval={interval}s)")
+    _init_sim_groups(csv_path)
+
+    if not _SIM_GROUPS or not _SIM_CODES:
+        print("⚠️ Simulation groups not ready. Aborting simulation loop.")
+        _SIM_RUNNING = False
+        return
+
+    print(f"▶️ Simulation active for codes={_SIM_CODES} | interval={interval}s")
 
     while _SIM_RUNNING:
-        for code in codes:
+        for code in _SIM_CODES:
             if not _SIM_RUNNING:
                 break
             try:
-                sample = next(groups[code])
+                sample = next(_SIM_GROUPS[code])
                 name = CODE_TO_NAME.get(code, f"device_{code}")
                 temp = float(sample["temperature"])
                 pres = float(sample["pressure"])
@@ -377,8 +407,21 @@ def start_simulation():
     global _SIM_TASK, _SIM_RUNNING
     if _SIM_RUNNING:
         return False
+
+    # تأكد أن الـ cycles مهيئة (مرة واحدة فقط)
+    _init_sim_groups(TEST_CSV_PATH)
+
+    if not _SIM_GROUPS:
+        print("❌ Cannot start simulation: no groups.")
+        _SIM_RUNNING = False
+        return False
+
     _SIM_RUNNING = True
-    _SIM_TASK = socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
+    _SIM_TASK = socketio.start_background_task(
+        simulate_from_csv_triplet,
+        TEST_CSV_PATH,
+        SIM_INTERVAL
+    )
     return True
 
 def stop_simulation():
@@ -424,7 +467,7 @@ def root():
 @app.post("/simulation/start")
 def api_sim_start():
     started = start_simulation()
-    msg = "Simulation started." if started else "Simulation already running."
+    msg = "Simulation started." if started else "Simulation already running or cannot start."
     return jsonify({"ok": True, "running": _SIM_RUNNING, "message": msg}), 200
 
 @app.post("/simulation/stop")
@@ -514,5 +557,4 @@ def latest():
 # ===================================================
 
 if __name__ == "__main__":
-    
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
