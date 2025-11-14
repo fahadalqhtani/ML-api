@@ -31,7 +31,7 @@ DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-# ✅ استخدم مودل ExtraTrees المدرَّب
+# ✅ ExtraTrees model path (تأكد الاسم موجود في الريبو)
 MODEL_PATH     = os.getenv("MODEL_PATH", "best_et_fold_optuna_model.pkl")
 RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
 TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
@@ -65,7 +65,6 @@ model = joblib_load(MODEL_PATH)
 # SHAP Initialization
 # ===================================================
 
-# ✅ أضفنا humidity إلى قائمة الفيتشر
 FEATURE_NAMES = ["temperature", "pressure", "vibration", "humidity", "equipment_code"]
 SENSOR_FEATURES = ["temperature", "pressure", "vibration", "humidity"]
 
@@ -101,9 +100,7 @@ except Exception:
     pass
 
 def feature_direction(feature: str, value: float) -> str:
-    """
-    Return 'high' or 'low' against a global median; falls back to 'abnormal'.
-    """
+    """Return 'high' or 'low' against a global median; falls back to 'abnormal'."""
     base = GLOBAL_BASELINE.get(feature)
     if base is None:
         return "abnormal"
@@ -132,12 +129,12 @@ def parse_timestamp(ts_str: str) -> datetime:
             pass
     return datetime.utcnow()
 
-# ✅ الآن المودل يستقبل 5 فيتشر (نفس ترتيب الداتا: temp, pressure, vibration, humidity, code)
+# ✅ model input: [temp, pressure, vibration, humidity, equipment_code]
 def compute_risk_score(temperature, vibration, pressure, humidity, equipment_code) -> int:
     """Use the trained model to produce a failure probability in %."""
     X = np.array(
         [[float(temperature), float(pressure), float(vibration), float(humidity), int(equipment_code)]],
-        dtype=float
+        dtype=float,
     )
     if hasattr(model, "predict_proba"):
         proba_faulty = float(model.predict_proba(X)[0][1])
@@ -255,7 +252,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
             text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
             {"name": name},
         )
-        # ✅ Insert reading مع humidity
+        # Insert reading
         reading_id = conn.execute(
             text("""
                 INSERT INTO reading (equipment_name, temperature, pressure, vibration, humidity, timestamp)
@@ -305,18 +302,25 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
 # Simulation
 # ===================================================
 
+# متغيرات التحكم في السيموليشن
+_SIM_TASK = None
+_SIM_RUNNING = False
+
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
-    """Simulate readings periodically from CSV."""
+    """Simulate readings periodically from CSV (يتوقف إذا _SIM_RUNNING = False)."""
+    global _SIM_RUNNING
     print(f"📡 Simulation starting from {csv_path} (every {interval}s)")
     if not Path(csv_path).exists():
         print(f"⚠️ CSV not found: {csv_path}. Simulation aborted.")
+        _SIM_RUNNING = False
         return
 
     df = pd.read_csv(csv_path)
-    # ✅ الآن نتوقع humidity أيضاً
     required = {"temperature", "pressure", "vibration", "humidity", "equipment_code"}
     if not required.issubset(df.columns):
-        raise RuntimeError(f"{csv_path} must contain columns: {required}. Found: {set(df.columns)}")
+        print(f"❌ CSV missing required columns. Found: {set(df.columns)}")
+        _SIM_RUNNING = False
+        return
 
     groups = {}
     for code, g in df.groupby("equipment_code"):
@@ -327,6 +331,7 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 
     if not groups:
         print("⚠️ No groups found in CSV. Simulation aborted.")
+        _SIM_RUNNING = False
         return
 
     codes = sorted(groups.keys())
@@ -344,8 +349,10 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
 
     print(f"▶️ Simulation groups: {codes} | interval={interval}s")
 
-    while True:
+    while _SIM_RUNNING:
         for code in codes:
+            if not _SIM_RUNNING:
+                break
             try:
                 sample = next(groups[code])
                 name = CODE_TO_NAME.get(code, f"device_{code}")
@@ -362,6 +369,25 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
                 continue
 
         eventlet.sleep(interval)
+
+    print("⏹ Simulation stopped.")
+
+def start_simulation():
+    """تشغيل السيموليشن (يُستدعى من الراوت /simulation/start)."""
+    global _SIM_TASK, _SIM_RUNNING
+    if _SIM_RUNNING:
+        return False
+    _SIM_RUNNING = True
+    _SIM_TASK = socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
+    return True
+
+def stop_simulation():
+    """إيقاف السيموليشن (تغيير الفلاغ فقط، اللوب يخرج بنفسه)."""
+    global _SIM_RUNNING
+    if not _SIM_RUNNING:
+        return False
+    _SIM_RUNNING = False
+    return True
 
 # ===================================================
 # API Routes
@@ -386,7 +412,26 @@ def db_test():
 
 @app.get("/")
 def root():
-    return jsonify({"ok": True, "service": "equipment-monitoring", "socket": True, "shap": _SHAP_OK}), 200
+    return jsonify({
+        "ok": True,
+        "service": "equipment-monitoring",
+        "socket": True,
+        "shap": _SHAP_OK,
+        "simulation_running": _SIM_RUNNING,
+    }), 200
+
+# 🔴 زر Start / Stop في الفرونت يستخدم هذه الراوتات:
+@app.post("/simulation/start")
+def api_sim_start():
+    started = start_simulation()
+    msg = "Simulation started." if started else "Simulation already running."
+    return jsonify({"ok": True, "running": _SIM_RUNNING, "message": msg}), 200
+
+@app.post("/simulation/stop")
+def api_sim_stop():
+    stopped = stop_simulation()
+    msg = "Simulation stopped." if stopped else "Simulation already stopped."
+    return jsonify({"ok": True, "running": _SIM_RUNNING, "message": msg}), 200
 
 @app.post("/ingest")
 def ingest():
@@ -398,7 +443,7 @@ def ingest():
         temperature = float(data["temperature"])
         vibration = float(data["vibration"])
         pressure = float(data["pressure"])
-        humidity = float(data["humidity"])   # ✅ حقل جديد قادم من الـ ESP32/الفرونت
+        humidity = float(data["humidity"])
         code = equipment_code_from_name(name)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Invalid input: {e}"}), 400
@@ -465,20 +510,9 @@ def latest():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ===================================================
-# Start Simulation
+# Entry point
 # ===================================================
 
-_SIM_STARTED = False
-def _ensure_simulation_started():
-    global _SIM_STARTED
-    if not _SIM_STARTED and os.getenv("DISABLE_SIM", "0") != "1":
-        _SHAP_STATUS = "ON" if _SHAP_OK else "OFF"
-        print(f"SHAP status: {_SHAP_STATUS}")
-        _SIM_STARTED = True
-        socketio.start_background_task(simulate_from_csv_triplet, TEST_CSV_PATH, SIM_INTERVAL)
-
-_ensure_simulation_started()
-
 if __name__ == "__main__":
-    _ensure_simulation_started()
+    
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
