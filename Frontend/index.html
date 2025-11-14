@@ -228,7 +228,7 @@
       const box = document.createElement('div');
       box.className = 'alert';
       box.innerHTML = `
-        <strong>WARNING:</strong> ${a.message || \`High failure risk detected on \${a.name}\`}
+        <strong>WARNING:</strong> ${a.message || ('High failure risk detected on ' + a.name)}
         <span class="time">${a.time}</span>
       `;
       alertsList.appendChild(box);
