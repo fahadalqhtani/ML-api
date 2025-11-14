@@ -197,6 +197,7 @@
   let simRunning = false;
 
   simBtn.addEventListener('click', async () => {
+    console.log('👉 sim button clicked');
     const action = simRunning ? 'stop' : 'start';
     simBtn.disabled = true;
 
@@ -204,15 +205,18 @@
       const res = await fetch(`${API_BASE}/simulation/${action}`, { method: 'POST' });
       const json = await res.json().catch(() => ({}));
 
-      if (res.ok && json.ok !== false) {
-        simRunning = !simRunning;
-        simBtn.textContent = simRunning ? 'Stop Simulation' : 'Start Simulation';
-        simBtn.style.background = simRunning ? '#dc2626' : '#2563eb';
-      } else {
+      if (!res.ok || json.ok === false) {
         console.warn('Simulation toggle failed:', json);
+        alert('Simulation request reached the server but failed.\nCheck /simulation logs on Render.');
+        return;
       }
+
+      simRunning = !simRunning;
+      simBtn.textContent = simRunning ? 'Stop Simulation' : 'Start Simulation';
+      simBtn.style.background = simRunning ? '#dc2626' : '#2563eb';
     } catch (err) {
       console.error('Simulation toggle error:', err);
+      alert('Could not reach the API server.\nIs https://ml-api-ec2k.onrender.com running?');
     } finally {
       simBtn.disabled = false;
     }
