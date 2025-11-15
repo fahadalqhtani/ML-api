@@ -7,7 +7,8 @@
 <style>
   :root{
     --bg:#f6f8fb; --ink:#1f2937; --muted:#6b7280; --card:#ffffff; --ring:#e5e7eb;
-    --warn:#fde2e2; --alert-bg:#fff8d6;
+    --warn-bg:#fef2f2; --warn-border:#fecaca; --warn-pill:#b91c1c; --warn-text:#7f1d1d;
+    --alert-bg:#fff8d6;
     --radius:1rem; --shadow:0 .6rem 1.5rem rgba(0,0,0,.06);
   }
   *{box-sizing:border-box}
@@ -45,7 +46,7 @@
     justify-content:space-between; position:relative;
   }
 
-  /* ===== header (العنوان + السيلكت + الأزرار) ===== */
+  /* ===== header ===== */
   .header{
     display:flex;
     flex-direction:row;
@@ -78,20 +79,6 @@
     background:#fff; font-size:1rem; min-width:14rem;
   }
 
-  #recordsBtn{
-    padding:.55em 1.2em;
-    border-radius:.7em;
-    border:.08rem solid var(--ring);
-    background:#fff;
-    font-size:.9rem;
-    cursor:pointer;
-    white-space:nowrap;
-  }
-  #recordsBtn:hover{
-    background:#eef2ff;
-  }
-
-  /* زر تشغيل / إيقاف السيموليشن */
   #simBtn{
     padding:.7em 1.4em;
     border-radius:.8em;
@@ -116,7 +103,7 @@
     box-shadow:none;
   }
 
-  /* ===== كروت القراءات (نفس التصميم القديم) ===== */
+  /* ===== metric cards ===== */
   .metrics{
     display:grid;
     grid-template-columns:repeat(4,1fr);
@@ -137,12 +124,20 @@
   .metric .value{font-size:1.4rem;font-weight:800;margin-top:auto;}
 
   /* ===== Active Alerts ===== */
-  .alerts{ background:var(--alert-bg); }
+  .alerts{
+    background:var(--alert-bg);
+    display:flex;
+    flex-direction:column;
+  }
   .alerts h2{
     margin:0 0 1rem;
     font-size:clamp(1.3rem,2vw,1.8rem);
     font-weight:900;
     text-align:center;
+  }
+  #alertsList{
+    flex:1;
+    overflow-y:auto;
   }
   .alert-empty{
     text-align:center;
@@ -150,18 +145,46 @@
     font-size:.95rem;
   }
   .alert-item{
-    background:#fff9e6;
-    border:.1rem solid #fde68a;
-    border-radius:.8rem;
-    padding:.8rem 1rem;
-    margin-bottom:.7rem;
+    background:var(--warn-bg);
+    border:.1rem solid var(--warn-border);
+    border-radius:.9rem;
+    padding:1rem 1.1rem;
+    margin-bottom:.8rem;
   }
-  .alert-item:last-child{margin-bottom:0;}
-  .alert-device{font-weight:700;margin:0 0 .25rem;}
-  .alert-msg{margin:0;font-size:.95rem;}
-  .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.85rem;}
+  .alert-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:.3rem;
+  }
+  .alert-device{
+    margin:0;
+    font-weight:700;
+  }
+  .alert-pill{
+    background:var(--warn-pill);
+    color:#fff;
+    font-size:.75rem;
+    padding:.15rem .6rem;
+    border-radius:999px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+  .alert-msg{
+    margin:.1rem 0 0;
+    font-size:.95rem;
+    color:var(--warn-text);
+    font-weight:500;
+  }
+  .time{
+    display:block;
+    margin-top:.35rem;
+    color:var(--muted);
+    font-size:.85rem;
+  }
 
-  /* ===== Records panel (بنل جديد تحت البانلز) ===== */
+  /* ===== Records panel (دائمًا ظاهر) ===== */
   .records{
     margin-top:1rem;
     width:95vw;
@@ -175,7 +198,6 @@
     flex-direction:column;
     gap:.6rem;
   }
-  .records.hidden{display:none;}
 
   .records-header{
     display:flex;
@@ -239,22 +261,17 @@
     <!-- Left panel -->
     <section class="panel" aria-label="Monitoring">
       <div class="header">
-        <!-- العنوان + السيلكت + زر Show Records -->
         <div class="title-group">
           <h1>Equipment Monitoring</h1>
           <div class="controls-row">
             <select id="deviceSelect" aria-label="Select equipment">
               <option disabled selected>Loading devices…</option>
             </select>
-            <button id="recordsBtn" type="button">Show Records</button>
           </div>
         </div>
-
-        <!-- زر تشغيل / إيقاف السيموليشن -->
         <button id="simBtn" type="button">Start Simulation</button>
       </div>
 
-      <!-- كروت القراءات (نفس السابق) -->
       <div class="metrics">
         <div class="metric" aria-label="Temperature">
           <h3>Temperature</h3>
@@ -282,14 +299,14 @@
     </aside>
   </div>
 
-  <!-- بنل السجلات تحت البانلز -->
-  <section id="recordsPanel" class="records hidden" aria-label="Recorded readings">
+  <!-- Records panel (دائمًا ظاهر) -->
+  <section id="recordsPanel" class="records" aria-label="Recorded readings">
     <div class="records-header">
       <h3>Recorded Readings &amp; Failures</h3>
       <p class="records-sub">Shows last 50 records for the selected equipment (from Postgres / prediction table).</p>
     </div>
     <div id="recordsContent" class="records-scroll">
-      <!-- سيتم تعبئته من الجافاسكربت -->
+      <!-- JS will fill -->
     </div>
   </section>
 
@@ -301,8 +318,6 @@
   const sel = document.getElementById('deviceSelect');
   const alertsList = document.getElementById('alertsList');
   const simBtn = document.getElementById('simBtn');
-  const recordsBtn = document.getElementById('recordsBtn');
-  const recordsPanel = document.getElementById('recordsPanel');
   const recordsContent = document.getElementById('recordsContent');
 
   const els = {
@@ -326,9 +341,8 @@
   let usingSocket = false;
   const alertsMap = new Map();
   let simRunning = false;
-  let recordsVisible = false;
 
-  // ======= Records helper functions =======
+  // ======= Records helper =======
   function renderRecordsTable(rows){
     if (!rows || !rows.length){
       recordsContent.innerHTML =
@@ -379,9 +393,6 @@
       return;
     }
 
-    recordsContent.innerHTML =
-      '<p style="margin:0;color:var(--muted);font-size:.9rem;">Loading records…</p>';
-
     try{
       const res = await fetch(
         `${API_BASE}/records?equipment_name=${encodeURIComponent(name)}&limit=50`
@@ -401,23 +412,8 @@
     }
   }
 
-  if (recordsBtn){
-    recordsBtn.addEventListener('click', async () => {
-      recordsVisible = !recordsVisible;
-      if (recordsVisible){
-        recordsPanel.classList.remove('hidden');
-        recordsBtn.textContent = 'Hide Records';
-        await fetchRecordsForSelected();
-      } else {
-        recordsPanel.classList.add('hidden');
-        recordsBtn.textContent = 'Show Records';
-      }
-    });
-  }
-
-  // ======= Start / Stop Simulation toggle (يرسل للباك اند) =======
+  // ======= Simulation toggle =======
   simBtn.addEventListener('click', async () => {
-    console.log('👉 sim button clicked');
     const action = simRunning ? 'stop' : 'start';
     simBtn.disabled = true;
 
@@ -426,8 +422,7 @@
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok || json.ok === false) {
-        console.warn('Simulation toggle failed:', json);
-        alert('Simulation request reached the server but failed.\nCheck /simulation logs on Render.');
+        alert('Simulation request failed.\nCheck /simulation logs on Render.');
         return;
       }
 
@@ -460,7 +455,10 @@
         const div = document.createElement('div');
         div.className = 'alert-item';
         div.innerHTML = `
-          <p class="alert-device">${a.name}</p>
+          <div class="alert-header">
+            <p class="alert-device">${a.name}</p>
+            <span class="alert-pill">Warning</span>
+          </div>
           <p class="alert-msg">${a.message || 'Abnormal condition detected.'}</p>
           <span class="time">${a.time}</span>
         `;
@@ -469,12 +467,6 @@
   }
 
   function upsertAlert(name, timeStr, message){
-    if (message) {
-      message = message
-        .replace(/^Warning:\s*/i, '')
-        .replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '')
-        .trim();
-    }
     alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
     renderAlerts();
   }
@@ -518,9 +510,12 @@
     } else {
       clearAlert(name);
     }
+
+    // كل ما تجينا قراءة جديدة للجهاز الحالي نحدّث الجدول مباشرة
+    await fetchRecordsForSelected();
   }
 
-  async function refreshAlertsForAllDevices(source='poll'){
+  async function refreshAlertsForAllDevices(){
     for (const name of devices){
       const data = await fetchLatest(name);
       if (!data) {
@@ -543,16 +538,14 @@
   // ======= Polling =======
   function startPolling(){
     if (pollTimer) return;
-    console.log('[Polling] start');
     pollTimer = setInterval(async () => {
       await updateSelectedCards('poll');
-      await refreshAlertsForAllDevices('poll');
+      await refreshAlertsForAllDevices();
     }, 5000);
   }
 
   function stopPolling(){
     if (!pollTimer) return;
-    console.log('[Polling] stop');
     clearInterval(pollTimer);
     pollTimer = null;
   }
@@ -580,21 +573,21 @@
       usingSocket = false;
     });
 
-    socket.on('reading_update', (msg) => {
+    socket.on('reading_update', async (msg) => {
       try{
         const name = String(msg?.equipment_name || '').trim();
         if (!name) return;
 
         const selected = (sel.value || '').trim();
-        const incoming = name;
-
-        if (selected && incoming === selected) {
+        if (selected && name === selected) {
           els.temp.textContent = fmt.temp(msg.temperature);
           els.vib .textContent = fmt.vib (msg.vibration);
           els.pres.textContent = fmt.pres(msg.pressure);
           if (msg.humidity !== undefined) {
             els.hum.textContent  = fmt.hum(msg.humidity);
           }
+          // تحديث الجدول مباشرة عند أي قراءة جديدة للجهاز الحالي
+          await fetchRecordsForSelected();
         }
 
         const risk = Number(msg?.risk_score || 0);
@@ -629,7 +622,8 @@
           ).join('');
 
         await updateSelectedCards('initial');
-        await refreshAlertsForAllDevices('initial');
+        await fetchRecordsForSelected();
+        await refreshAlertsForAllDevices();
         return;
       } catch (e) {
         console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
@@ -645,9 +639,7 @@
     els.temp.textContent = els.vib.textContent =
       els.pres.textContent = els.hum.textContent = '--';
     await updateSelectedCards('select-change');
-    if (recordsVisible){
-      fetchRecordsForSelected();
-    }
+    await fetchRecordsForSelected();
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
