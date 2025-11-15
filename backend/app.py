@@ -552,6 +552,57 @@ def latest():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+ @app.get("/records")
+ def records():
+        """Return last N readings + prediction info for a specific equipment."""
+        name = request.args.get("equipment_name", "").strip()
+        limit_str = request.args.get("limit", "50")
+    
+        if not name:
+            return jsonify({"ok": False, "error": "equipment_name is required"}), 400
+    
+        try:
+            limit = int(limit_str)
+        except ValueError:
+            limit = 50
+    
+        try:
+            with engine.begin() as conn:
+                rows = conn.execute(text("""
+                    SELECT
+                        r.temperature,
+                        r.vibration,
+                        r.pressure,
+                        r.humidity,
+                        r.timestamp,
+                        p.prediction,
+                        p.probability,
+                        p.message
+                    FROM reading r
+                    JOIN prediction p ON p.reading_id = r.id
+                    WHERE r.equipment_name = :name
+                    ORDER BY r.id DESC
+                    LIMIT :limit
+                """), {"name": name, "limit": limit}).mappings().all()
+    
+            data = []
+            for row in rows:
+                data.append({
+                    "temperature": float(row["temperature"]),
+                    "vibration": float(row["vibration"]),
+                    "pressure": float(row["pressure"]),
+                    "humidity": float(row["humidity"]),
+                    "timestamp": row["timestamp"].isoformat(),
+                    "prediction": int(row["prediction"]),
+                    "probability": float(row["probability"]),
+                    "message": row["message"],
+                })
+    
+            return jsonify({"ok": True, "data": data}), 200
+    
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
 # ===================================================
 # Entry point
 # ===================================================
