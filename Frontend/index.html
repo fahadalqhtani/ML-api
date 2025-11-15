@@ -184,7 +184,7 @@
     font-size:.85rem;
   }
 
-  /* ===== Records panel (دائمًا ظاهر) ===== */
+  /* ===== Records panel ===== */
   .records{
     margin-top:1rem;
     width:95vw;
@@ -299,7 +299,7 @@
     </aside>
   </div>
 
-  <!-- Records panel (دائمًا ظاهر) -->
+  <!-- Records panel (always visible) -->
   <section id="recordsPanel" class="records" aria-label="Recorded readings">
     <div class="records-header">
       <h3>Recorded Readings &amp; Failures</h3>
@@ -310,9 +310,9 @@
     </div>
   </section>
 
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
-  const API_BASE = "https://ml-api-ec2k.onrender.com";
+  // ======== CONFIG ========
+  const API_BASE = "https://ml-api-ec2k.onrender.com"; // عدّلها لو عندك URL مختلف
   const RISK_THRESHOLD = 85;
 
   const sel = document.getElementById('deviceSelect');
@@ -335,14 +335,12 @@
     clock: () => new Date().toLocaleTimeString('en-US', { hour12: true }),
   };
 
-  let socket = null;
-  let pollTimer = null;
   let devices = [];
-  let usingSocket = false;
   const alertsMap = new Map();
   let simRunning = false;
+  let pollTimer = null;
 
-  // ======= Records helper =======
+  // ======== Records table ========
   function renderRecordsTable(rows){
     if (!rows || !rows.length){
       recordsContent.innerHTML =
@@ -364,17 +362,28 @@
         </tr>
       </thead>`;
 
-    const body = rows.map(r => `
-      <tr class="${Number(r.prediction) === 1 ? 'row-fail' : ''}">
-        <td>${new Date(r.timestamp).toLocaleString()}</td>
-        <td>${Number(r.temperature).toFixed(1)}</td>
-        <td>${Number(r.vibration).toFixed(2)}</td>
-        <td>${Number(r.pressure).toFixed(0)}</td>
-        <td>${Number(r.humidity).toFixed(1)}</td>
-        <td>${Number(r.prediction) === 1 ? 'Failure' : 'Normal'}</td>
-        <td>${(Number(r.probability) * 100).toFixed(0)}%</td>
-        <td>${r.message ?? ''}</td>
-      </tr>`).join('');
+    const body = rows.map(r => {
+      const timeStr = new Date(r.timestamp).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      });
+      return `
+        <tr class="${Number(r.prediction) === 1 ? 'row-fail' : ''}">
+          <td>${timeStr}</td>
+          <td>${Number(r.temperature).toFixed(1)}</td>
+          <td>${Number(r.vibration).toFixed(2)}</td>
+          <td>${Number(r.pressure).toFixed(0)}</td>
+          <td>${Number(r.humidity).toFixed(1)}</td>
+          <td>${Number(r.prediction) === 1 ? 'Failure' : 'Normal'}</td>
+          <td>${(Number(r.probability) * 100).toFixed(0)}%</td>
+          <td>${r.message ?? ''}</td>
+        </tr>`;
+    }).join('');
 
     recordsContent.innerHTML = `
       <div class="records-scroll">
@@ -412,32 +421,7 @@
     }
   }
 
-  // ======= Simulation toggle =======
-  simBtn.addEventListener('click', async () => {
-    const action = simRunning ? 'stop' : 'start';
-    simBtn.disabled = true;
-
-    try {
-      const res = await fetch(`${API_BASE}/simulation/${action}`, { method: 'POST' });
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok || json.ok === false) {
-        alert('Simulation request failed.\nCheck /simulation logs on Render.');
-        return;
-      }
-
-      simRunning = !simRunning;
-      simBtn.textContent = simRunning ? 'Stop Simulation' : 'Start Simulation';
-      simBtn.style.background = simRunning ? '#dc2626' : '#2563eb';
-    } catch (err) {
-      console.error('Simulation toggle error:', err);
-      alert('Could not reach the API server.\nIs your Render service running?');
-    } finally {
-      simBtn.disabled = false;
-    }
-  });
-
-  // ======= Alerts UI =======
+  // ======== Alerts UI ========
   function renderAlerts(){
     alertsList.innerHTML = '';
     const alerts = Array.from(alertsMap.values());
@@ -475,7 +459,7 @@
     if (alertsMap.delete(name)) renderAlerts();
   }
 
-  // ======= Data fetchers =======
+  // ======== API helpers ========
   async function fetchLatest(name){
     try{
       const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
@@ -489,7 +473,7 @@
     }
   }
 
-  async function updateSelectedCards(source='poll'){
+  async function updateSelectedCards(source = 'poll'){
     const name = (sel.value || '').trim();
     if (!name || name.startsWith('Loading') || name.startsWith('Could not')) return;
 
@@ -503,7 +487,8 @@
 
     const risk = Number(data.risk_score || 0);
     const prediction = Number(data.prediction || 0);
-    const timeStr = new Date(data.timestamp || Date.now()).toLocaleTimeString('en-US',{hour12:true});
+    const timeStr = new Date(data.timestamp || Date.now())
+      .toLocaleTimeString('en-US',{hour12:true});
 
     if (risk >= RISK_THRESHOLD || prediction === 1) {
       upsertAlert(name, timeStr, data.message);
@@ -511,7 +496,7 @@
       clearAlert(name);
     }
 
-    // كل ما تجينا قراءة جديدة للجهاز الحالي نحدّث الجدول مباشرة
+    // جدول القراءات يتحدث مع كل مرة نستدعي فيها هذه الدالة
     await fetchRecordsForSelected();
   }
 
@@ -535,75 +520,41 @@
     }
   }
 
-  // ======= Polling =======
+  // ======== Polling فقط ========
   function startPolling(){
     if (pollTimer) return;
     pollTimer = setInterval(async () => {
       await updateSelectedCards('poll');
       await refreshAlertsForAllDevices();
-    }, 5000);
+    }, 5000); // كل 5 ثواني
   }
 
-  function stopPolling(){
-    if (!pollTimer) return;
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  // ======== Simulation زر ========
+  simBtn.addEventListener('click', async () => {
+    const action = simRunning ? 'stop' : 'start';
+    simBtn.disabled = true;
 
-  // ======= Socket.IO =======
-  function connectSocket(){
-    if (!window.io) {
-      console.warn('Socket.IO client not loaded, falling back to polling only.');
-      usingSocket = false;
-      return;
-    }
+    try {
+      const res = await fetch(`${API_BASE}/simulation/${action}`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
 
-    socket = io(API_BASE, {
-      transports:['websocket','polling'],
-      path:'/socket.io',
-    });
-
-    socket.on('connect', () => {
-      console.log('[Socket] connected');
-      usingSocket = true;
-    });
-
-    socket.on('disconnect', () => {
-      console.log('[Socket] disconnected');
-      usingSocket = false;
-    });
-
-    socket.on('reading_update', async (msg) => {
-      try{
-        const name = String(msg?.equipment_name || '').trim();
-        if (!name) return;
-
-        const selected = (sel.value || '').trim();
-        if (selected && name === selected) {
-          els.temp.textContent = fmt.temp(msg.temperature);
-          els.vib .textContent = fmt.vib (msg.vibration);
-          els.pres.textContent = fmt.pres(msg.pressure);
-          if (msg.humidity !== undefined) {
-            els.hum.textContent  = fmt.hum(msg.humidity);
-          }
-          // تحديث الجدول مباشرة عند أي قراءة جديدة للجهاز الحالي
-          await fetchRecordsForSelected();
-        }
-
-        const risk = Number(msg?.risk_score || 0);
-        const timeStr = msg?.date || fmt.clock();
-        if (risk >= RISK_THRESHOLD) {
-          upsertAlert(name, timeStr, msg?.message);
-        } else {
-          clearAlert(name);
-        }
-      } catch(err){
-        console.error('[Socket] handler error:', err);
+      if (!res.ok || json.ok === false) {
+        alert('Simulation request failed.\nCheck /simulation logs on Render.');
+        return;
       }
-    });
-  }
 
-  // ======= Boot =======
+      simRunning = !simRunning;
+      simBtn.textContent = simRunning ? 'Stop Simulation' : 'Start Simulation';
+      simBtn.style.background = simRunning ? '#dc2626' : '#2563eb';
+    } catch (err) {
+      console.error('Simulation toggle error:', err);
+      alert('Could not reach the API server.\nIs your Render service running?');
+    } finally {
+      simBtn.disabled = false;
+    }
+  });
+
+  // ======== Load devices ========
   async function loadDevices() {
     const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
 
@@ -622,7 +573,6 @@
           ).join('');
 
         await updateSelectedCards('initial');
-        await fetchRecordsForSelected();
         await refreshAlertsForAllDevices();
         return;
       } catch (e) {
@@ -639,13 +589,11 @@
     els.temp.textContent = els.vib.textContent =
       els.pres.textContent = els.hum.textContent = '--';
     await updateSelectedCards('select-change');
-    await fetchRecordsForSelected();
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
-    connectSocket();
-    startPolling();
+    startPolling();   // فقط polling
   });
   </script>
 </body>
