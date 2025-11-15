@@ -363,15 +363,16 @@
       </thead>`;
 
     const body = rows.map(r => {
-      const timeStr = new Date(r.timestamp).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-      });
+     const timeStr = new Date(r.timestamp).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
+
       return `
         <tr class="${Number(r.prediction) === 1 ? 'row-fail' : ''}">
           <td>${timeStr}</td>
@@ -423,32 +424,32 @@
 
   // ======== Alerts UI ========
   function renderAlerts(){
-    alertsList.innerHTML = '';
-    const alerts = Array.from(alertsMap.values());
-    if (!alerts.length){
-      const p = document.createElement('p');
-      p.className = 'alert-empty';
-      p.textContent = 'No active alerts.';
-      alertsList.appendChild(p);
-      return;
-    }
-
-    alerts
-      .sort((a,b) => b._ts - a._ts)
-      .forEach(a => {
-        const div = document.createElement('div');
-        div.className = 'alert-item';
-        div.innerHTML = `
-          <div class="alert-header">
-            <p class="alert-device">${a.name}</p>
-            <span class="alert-pill">Warning</span>
-          </div>
-          <p class="alert-msg">${a.message || 'Abnormal condition detected.'}</p>
-          <span class="time">${a.time}</span>
-        `;
-        alertsList.appendChild(div);
-      });
+  alertsList.innerHTML = '';
+  const alerts = Array.from(alertsMap.values());
+  if (!alerts.length){
+    const p = document.createElement('p');
+    p.className = 'alert-empty';
+    p.textContent = 'No active alerts.';
+    alertsList.appendChild(p);
+    return;
   }
+
+  alerts
+    .sort((a,b) => b._ts - a._ts)
+    .forEach(a => {
+      const div = document.createElement('div');
+      div.className = 'alert-item';
+      div.innerHTML = `
+        <div class="alert-header">
+          <span class="alert-pill">WARNING</span>
+        </div>
+        <p class="alert-msg">${a.message || 'Abnormal condition detected.'}</p>
+        <span class="time">${a.time}</span>
+      `;
+      alertsList.appendChild(div);
+    });
+}
+
 
   function upsertAlert(name, timeStr, message){
     alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
@@ -598,3 +599,4 @@
   </script>
 </body>
 </html>
+
