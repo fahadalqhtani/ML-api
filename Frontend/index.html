@@ -11,30 +11,41 @@
     --radius:1rem; --shadow:0 .6rem 1.5rem rgba(0,0,0,.06);
   }
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0}
+  html,body{margin:0;padding:0}
   body{
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
     background:var(--bg); color:var(--ink); font-size:1rem;
-    display:flex; justify-content:center; align-items:center;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:1.5rem 0;
   }
+
   .wrap{
-    width:95vw; height:95vh;
-    display:grid; grid-template-columns:2fr 1fr; gap:1.5rem;
+    width:95vw;
+    min-height:60vh;
+    display:grid;
+    grid-template-columns:2fr 1fr;
+    gap:1.5rem;
   }
   @media (max-width:980px){
-    .wrap{grid-template-columns:1fr;height:auto;}
+    .wrap{
+      grid-template-columns:1fr;
+      min-height:auto;
+    }
   }
 
   .panel,.alerts{
     border:.1rem solid var(--ring); border-radius:var(--radius);
     box-shadow:var(--shadow); padding:2rem;
+    background:var(--card);
   }
   .panel{
-    background:var(--card); display:flex; flex-direction:column;
-    justify-content:flex-start; position:relative;
+    display:flex; flex-direction:column;
+    justify-content:space-between; position:relative;
   }
 
-  /* ===== header ===== */
+  /* ===== header (العنوان + السيلكت + الأزرار) ===== */
   .header{
     display:flex;
     flex-direction:row;
@@ -52,47 +63,52 @@
   .title-group{
     display:flex;
     flex-direction:column;
-    gap:.7rem;
+    gap:.75rem;
   }
 
   .controls-row{
     display:flex;
     flex-wrap:wrap;
+    gap:.75rem;
     align-items:center;
-    gap:.6rem;
   }
 
   select{
-    min-width:220px;
-    padding:.55em .9em;
-    border-radius:.7em;
-    border:.1rem solid var(--ring);
-    background:#f9fafb;
-    font-size:.95rem;
-    outline:none;
-  }
-  select:focus{
-    border-color:#2563eb;
-    box-shadow:0 0 0 .14rem rgba(37,99,235,.18);
+    padding:.6em 1em; border-radius:.7em; border:.1rem solid var(--ring);
+    background:#fff; font-size:1rem; min-width:14rem;
   }
 
+  #recordsBtn{
+    padding:.55em 1.2em;
+    border-radius:.7em;
+    border:.08rem solid var(--ring);
+    background:#fff;
+    font-size:.9rem;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  #recordsBtn:hover{
+    background:#eef2ff;
+  }
+
+  /* زر تشغيل / إيقاف السيموليشن */
   #simBtn{
-    padding:.75em 1.7em;
-    border-radius:999px;
+    padding:.7em 1.4em;
+    border-radius:.8em;
     border:none;
     background:#2563eb;
     color:#fff;
-    font-weight:700;
-    font-size:.95rem;
+    font-size:1rem;
+    font-weight:600;
     cursor:pointer;
-    align-self:flex-start;
-    box-shadow:0 .6rem 1.4rem rgba(37,99,235,.45);
+    box-shadow:0 .3rem .9rem rgba(37,99,235,.25);
     transition:background .15s ease, transform .15s ease, box-shadow .15s ease;
     white-space:nowrap;
   }
-  #simBtn:hover:not(:disabled){
+  #simBtn:hover{
+    background:#1d4ed8;
     transform:translateY(-1px);
-    box-shadow:0 .6rem 1.6rem rgba(37,99,235,.55);
+    box-shadow:0 .6rem 1.4rem rgba(37,99,235,.35);
   }
   #simBtn:disabled{
     opacity:.6;
@@ -100,217 +116,194 @@
     box-shadow:none;
   }
 
-  #recordsBtn{
-    padding:.55em 1.1em;
-    border-radius:.7em;
-    border:.1rem solid var(--ring);
-    background:#ffffff;
-    font-size:.9rem;
-    font-weight:600;
-    cursor:pointer;
-    transition:background .15s ease, box-shadow .15s ease, transform .15s ease;
-    white-space:nowrap;
-  }
-  #recordsBtn:hover:not(:disabled){
-    background:#e5edff;
-    box-shadow:0 .3rem .9rem rgba(37,99,235,.18);
-    transform:translateY(-1px);
-  }
-  #recordsBtn:disabled{
-    opacity:.6;
-    cursor:default;
-  }
-
-  /* ===== metrics cards ===== */
+  /* ===== كروت القراءات (نفس التصميم القديم) ===== */
   .metrics{
     display:grid;
-    grid-template-columns:repeat(4,minmax(0,1fr));
+    grid-template-columns:repeat(4,1fr);
     gap:1rem;
+    margin-top:2rem;
   }
-  @media (max-width:900px){
-    .metrics{grid-template-columns:repeat(2,minmax(0,1fr));}
-  }
-  @media (max-width:520px){
-    .metrics{grid-template-columns:1fr;}
-  }
+  @media (max-width:1100px){.metrics{grid-template-columns:repeat(2,1fr);}}
+  @media (max-width:600px){.metrics{grid-template-columns:1fr;}}
 
   .metric{
-    background:#f3f4f6;
-    border-radius:.9rem;
-    padding:1.1rem 1.2rem;
-    display:flex;
-    flex-direction:column;
-    gap:.2rem;
+    background:#f3f6fb; border:.1rem solid var(--ring); border-radius:.9rem;
+    text-align:center; padding:1.4rem; min-height:10rem;
+    display:flex; flex-direction:column; justify-content:space-between;
+    transition:transform .2s ease;
   }
-  .metric-label{
-    font-size:.9rem;
-    color:var(--muted);
-  }
-  .metric-value{
-    font-weight:800;
-    font-size:1.3rem;
-  }
+  .metric:hover{transform:translateY(-.2rem);}
+  .metric h3{margin:0;font-size:1.2rem;font-weight:700;}
+  .metric .value{font-size:1.4rem;font-weight:800;margin-top:auto;}
 
-  /* ===== records panel ===== */
-  .records{
-    margin-top:1.5rem;
-    background:#ffffff;
-    border:.1rem solid var(--ring);
-    border-radius:.9rem;
-    padding:1rem;
-    max-height:230px;
-    overflow:auto;
-    font-size:.85rem;
-  }
-  .records.hidden{display:none;}
-  .records h3{
-    margin:.1rem 0 .6rem;
-    font-size:.95rem;
-  }
-  .records-body{width:100%;}
-
-  .records-table{
-    width:100%;
-    border-collapse:collapse;
-    font-size:.82rem;
-  }
-  .records-table th,
-  .records-table td{
-    padding:.25rem .4rem;
-    border-bottom:.05rem solid #e5e7eb;
-    text-align:left;
-    white-space:nowrap;
-  }
-  .records-table th{
-    font-weight:600;
-    background:#f9fafb;
-    position:sticky;
-    top:0;
-  }
-
-  .badge-ok{
-    background:#dcfce7;
-    color:#166534;
-    padding:.1rem .45rem;
-    border-radius:.5rem;
-    font-weight:600;
-    font-size:.78rem;
-  }
-  .badge-fail{
-    background:#fee2e2;
-    color:#991b1b;
-    padding:.1rem .45rem;
-    border-radius:.5rem;
-    font-weight:600;
-    font-size:.78rem;
-  }
-
-  /* ===== alerts panel ===== */
-  .alerts{
-    background:var(--alert-bg);
-    display:flex;
-    flex-direction:column;
-  }
+  /* ===== Active Alerts ===== */
+  .alerts{ background:var(--alert-bg); }
   .alerts h2{
     margin:0 0 1rem;
     font-size:clamp(1.3rem,2vw,1.8rem);
     font-weight:900;
     text-align:center;
   }
-  #alertsList{
-    list-style:none;
-    padding:0;
+  .alert-empty{
+    text-align:center;
+    color:var(--muted);
+    font-size:.95rem;
+  }
+  .alert-item{
+    background:#fff9e6;
+    border:.1rem solid #fde68a;
+    border-radius:.8rem;
+    padding:.8rem 1rem;
+    margin-bottom:.7rem;
+  }
+  .alert-item:last-child{margin-bottom:0;}
+  .alert-device{font-weight:700;margin:0 0 .25rem;}
+  .alert-msg{margin:0;font-size:.95rem;}
+  .time{display:block;margin-top:.3rem;color:var(--muted);font-size:.85rem;}
+
+  /* ===== Records panel (بنل جديد تحت البانلز) ===== */
+  .records{
+    margin-top:1rem;
+    width:95vw;
+    background:var(--card);
+    border:.1rem solid var(--ring);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:1rem 1.5rem 1.25rem;
+    max-height:260px;
+    display:flex;
+    flex-direction:column;
+    gap:.6rem;
+  }
+  .records.hidden{display:none;}
+
+  .records-header{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:space-between;
+    align-items:baseline;
+    gap:.4rem .75rem;
+  }
+  .records-header h3{
     margin:0;
-    overflow-y:auto;
+    font-size:1rem;
+    font-weight:700;
+  }
+  .records-sub{
+    margin:0;
+    font-size:.85rem;
+    color:var(--muted);
   }
 
-  .alert{
-    background:var(--warn);
-    border:.1rem solid #f6caca;
-    border-radius:.8rem;
-    padding:1rem 1.2rem;
-    margin-top:1rem;
+  .records-scroll{overflow:auto;}
+
+  .records-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:.8rem;
   }
-  .alert strong{margin-right:.4rem;}
-  .time{
-    display:block;
-    margin-top:.3rem;
-    color:var(--muted);
-    font-size:.9rem;
+  .records-table th,
+  .records-table td{
+    padding:.35rem .5rem;
+    border-bottom:.05rem solid #e5e7eb;
+    text-align:left;
+    vertical-align:top;
+  }
+  .records-table th{
+    font-weight:700;
+    background:#f9fafb;
+    position:sticky;
+    top:0;
+    z-index:1;
+  }
+  .records-table tr.row-fail{
+    background:rgba(248,113,113,.08);
+  }
+  .records-table tr.row-fail td:nth-child(6),
+  .records-table tr.row-fail td:nth-child(7){
+    font-weight:700;
+  }
+
+  @media (max-width:980px){
+    .records{width:95vw;}
+    .header{
+      flex-direction:column;
+      align-items:flex-start;
+      gap:1rem;
+    }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <!-- LEFT: main panel -->
-  <main class="panel" aria-label="Equipment monitoring dashboard">
-    <div class="header">
-      <div class="title-group">
-        <h1>Equipment Monitoring</h1>
+  <div class="wrap">
+    <!-- Left panel -->
+    <section class="panel" aria-label="Monitoring">
+      <div class="header">
+        <!-- العنوان + السيلكت + زر Show Records -->
+        <div class="title-group">
+          <h1>Equipment Monitoring</h1>
+          <div class="controls-row">
+            <select id="deviceSelect" aria-label="Select equipment">
+              <option disabled selected>Loading devices…</option>
+            </select>
+            <button id="recordsBtn" type="button">Show Records</button>
+          </div>
+        </div>
 
-        <div class="controls-row">
-          <select id="deviceSelect" aria-label="Select equipment">
-            <option disabled selected>Loading devices…</option>
-          </select>
-          <button id="recordsBtn" type="button">Show Records</button>
+        <!-- زر تشغيل / إيقاف السيموليشن -->
+        <button id="simBtn" type="button">Start Simulation</button>
+      </div>
+
+      <!-- كروت القراءات (نفس السابق) -->
+      <div class="metrics">
+        <div class="metric" aria-label="Temperature">
+          <h3>Temperature</h3>
+          <div class="value" id="tempVal">--</div>
+        </div>
+        <div class="metric" aria-label="Vibration">
+          <h3>Vibration</h3>
+          <div class="value" id="vibVal">--</div>
+        </div>
+        <div class="metric" aria-label="Pressure">
+          <h3>Pressure</h3>
+          <div class="value" id="presVal">--</div>
+        </div>
+        <div class="metric" aria-label="Humidity">
+          <h3>Humidity</h3>
+          <div class="value" id="humVal">--</div>
         </div>
       </div>
-
-      <button id="simBtn" type="button">Start Simulation</button>
-    </div>
-
-    <!-- metrics cards -->
-    <section class="metrics" aria-label="Current readings">
-      <article class="metric">
-        <div class="metric-label">Temperature</div>
-        <div class="metric-value" id="tempVal">--</div>
-      </article>
-      <article class="metric">
-        <div class="metric-label">Vibration</div>
-        <div class="metric-value" id="vibVal">--</div>
-      </article>
-      <article class="metric">
-        <div class="metric-label">Pressure</div>
-        <div class="metric-value" id="presVal">--</div>
-      </article>
-      <article class="metric">
-        <div class="metric-label">Humidity</div>
-        <div class="metric-value" id="humVal">--</div>
-      </article>
     </section>
 
-    <!-- records panel (hidden by default) -->
-    <section id="recordsPanel" class="records hidden" aria-label="Recorded readings">
+    <!-- Right panel -->
+    <aside class="alerts" aria-label="Active alerts">
+      <h2>Active Alerts</h2>
+      <div id="alertsList"></div>
+    </aside>
+  </div>
+
+  <!-- بنل السجلات تحت البانلز -->
+  <section id="recordsPanel" class="records hidden" aria-label="Recorded readings">
+    <div class="records-header">
       <h3>Recorded Readings &amp; Failures</h3>
-      <div id="recordsContent" class="records-body">
-        <!-- filled by JS -->
-      </div>
-    </section>
-  </main>
+      <p class="records-sub">Shows last 50 records for the selected equipment (from Postgres / prediction table).</p>
+    </div>
+    <div id="recordsContent" class="records-scroll">
+      <!-- سيتم تعبئته من الجافاسكربت -->
+    </div>
+  </section>
 
-  <!-- RIGHT: alerts -->
-  <aside class="alerts" aria-label="Active alerts">
-    <h2>Active Alerts</h2>
-    <ul id="alertsList"></ul>
-  </aside>
-</div>
-
-<!-- Socket.IO (optional: يعمل إذا السيرفر مفعّل سوكيت) -->
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
-        integrity="sha384-PiRYlosnTDHKkVdRU1qBDIGlfLeqfO1rDBU3lBSR5I7P0KXbSL+MEsQq1Q9ctQ0"
-        crossorigin="anonymous"></script>
-
-<script>
-  // غيّر الرابط إذا احتجت
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
   const API_BASE = "https://ml-api-ec2k.onrender.com";
   const RISK_THRESHOLD = 85;
 
-  const sel           = document.getElementById('deviceSelect');
-  const simBtn        = document.getElementById('simBtn');
-  const alertsList    = document.getElementById('alertsList');
-  const recordsBtn    = document.getElementById('recordsBtn');
-  const recordsPanel  = document.getElementById('recordsPanel');
-  const recordsContent= document.getElementById('recordsContent');
+  const sel = document.getElementById('deviceSelect');
+  const alertsList = document.getElementById('alertsList');
+  const simBtn = document.getElementById('simBtn');
+  const recordsBtn = document.getElementById('recordsBtn');
+  const recordsPanel = document.getElementById('recordsPanel');
+  const recordsContent = document.getElementById('recordsContent');
 
   const els = {
     temp: document.getElementById('tempVal'),
@@ -327,259 +320,341 @@
     clock: () => new Date().toLocaleTimeString('en-US', { hour12: true }),
   };
 
-  let socket     = null;
-  let pollTimer  = null;
+  let socket = null;
+  let pollTimer = null;
+  let devices = [];
+  let usingSocket = false;
+  const alertsMap = new Map();
   let simRunning = false;
   let recordsVisible = false;
 
-  // ========== API helpers ==========
-  async function fetchJSON(url){
-    const res = await fetch(url);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if(json.ok === false) throw new Error(json.error || 'API error');
-    return json;
+  // ======= Records helper functions =======
+  function renderRecordsTable(rows){
+    if (!rows || !rows.length){
+      recordsContent.innerHTML =
+        '<p style="margin:0;color:var(--muted);font-size:.9rem;">No records found for this equipment yet.</p>';
+      return;
+    }
+
+    const header = `
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Temp (°C)</th>
+          <th>Vibration</th>
+          <th>Pressure (psi)</th>
+          <th>Humidity (%)</th>
+          <th>Prediction</th>
+          <th>Risk</th>
+          <th>Message</th>
+        </tr>
+      </thead>`;
+
+    const body = rows.map(r => `
+      <tr class="${Number(r.prediction) === 1 ? 'row-fail' : ''}">
+        <td>${new Date(r.timestamp).toLocaleString()}</td>
+        <td>${Number(r.temperature).toFixed(1)}</td>
+        <td>${Number(r.vibration).toFixed(2)}</td>
+        <td>${Number(r.pressure).toFixed(0)}</td>
+        <td>${Number(r.humidity).toFixed(1)}</td>
+        <td>${Number(r.prediction) === 1 ? 'Failure' : 'Normal'}</td>
+        <td>${(Number(r.probability) * 100).toFixed(0)}%</td>
+        <td>${r.message ?? ''}</td>
+      </tr>`).join('');
+
+    recordsContent.innerHTML = `
+      <div class="records-scroll">
+        <table class="records-table">
+          ${header}
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
   }
 
-  async function loadDevices(){
+  async function fetchRecordsForSelected(){
+    const name = (sel.value || '').trim();
+    if (!name || name.startsWith('Loading') || name.startsWith('Could not')){
+      recordsContent.innerHTML =
+        '<p style="margin:0;color:var(--muted);font-size:.9rem;">Please select an equipment first.</p>';
+      return;
+    }
+
+    recordsContent.innerHTML =
+      '<p style="margin:0;color:var(--muted);font-size:.9rem;">Loading records…</p>';
+
     try{
-      const json = await fetchJSON(`${API_BASE}/equipment`);
-      const list = json.equipment || [];
-      sel.innerHTML = '';
-      if(!list.length){
-        sel.innerHTML = '<option disabled selected>No devices found</option>';
-        simBtn.disabled = true;
-        recordsBtn.disabled = true;
+      const res = await fetch(
+        `${API_BASE}/records?equipment_name=${encodeURIComponent(name)}&limit=50`
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { ok, data } = await res.json();
+      if (ok){
+        renderRecordsTable(data || []);
+      } else {
+        recordsContent.innerHTML =
+          '<p style="margin:0;color:var(--muted);font-size:.9rem;">Could not load records.</p>';
+      }
+    } catch(err){
+      console.error('records error:', err);
+      recordsContent.innerHTML =
+        '<p style="margin:0;color:var(--muted);font-size:.9rem;">Error loading records.</p>';
+    }
+  }
+
+  if (recordsBtn){
+    recordsBtn.addEventListener('click', async () => {
+      recordsVisible = !recordsVisible;
+      if (recordsVisible){
+        recordsPanel.classList.remove('hidden');
+        recordsBtn.textContent = 'Hide Records';
+        await fetchRecordsForSelected();
+      } else {
+        recordsPanel.classList.add('hidden');
+        recordsBtn.textContent = 'Show Records';
+      }
+    });
+  }
+
+  // ======= Start / Stop Simulation toggle (يرسل للباك اند) =======
+  simBtn.addEventListener('click', async () => {
+    console.log('👉 sim button clicked');
+    const action = simRunning ? 'stop' : 'start';
+    simBtn.disabled = true;
+
+    try {
+      const res = await fetch(`${API_BASE}/simulation/${action}`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || json.ok === false) {
+        console.warn('Simulation toggle failed:', json);
+        alert('Simulation request reached the server but failed.\nCheck /simulation logs on Render.');
         return;
       }
-      for(const name of list){
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
-        sel.appendChild(opt);
-      }
-      sel.selectedIndex = 0;
+
+      simRunning = !simRunning;
+      simBtn.textContent = simRunning ? 'Stop Simulation' : 'Start Simulation';
+      simBtn.style.background = simRunning ? '#dc2626' : '#2563eb';
+    } catch (err) {
+      console.error('Simulation toggle error:', err);
+      alert('Could not reach the API server.\nIs your Render service running?');
+    } finally {
       simBtn.disabled = false;
-      recordsBtn.disabled = false;
-      await updateSelectedCards('initial-load');
-    }catch(err){
-      console.error('loadDevices:', err);
-      sel.innerHTML = '<option disabled selected>Failed to load devices</option>';
-      simBtn.disabled = true;
-      recordsBtn.disabled = true;
     }
+  });
+
+  // ======= Alerts UI =======
+  function renderAlerts(){
+    alertsList.innerHTML = '';
+    const alerts = Array.from(alertsMap.values());
+    if (!alerts.length){
+      const p = document.createElement('p');
+      p.className = 'alert-empty';
+      p.textContent = 'No active alerts.';
+      alertsList.appendChild(p);
+      return;
+    }
+
+    alerts
+      .sort((a,b) => b._ts - a._ts)
+      .forEach(a => {
+        const div = document.createElement('div');
+        div.className = 'alert-item';
+        div.innerHTML = `
+          <p class="alert-device">${a.name}</p>
+          <p class="alert-msg">${a.message || 'Abnormal condition detected.'}</p>
+          <span class="time">${a.time}</span>
+        `;
+        alertsList.appendChild(div);
+      });
   }
 
+  function upsertAlert(name, timeStr, message){
+    if (message) {
+      message = message
+        .replace(/^Warning:\s*/i, '')
+        .replace(/\s+at\s+\d{1,2}:\d{2}:\d{2}\s*(AM|PM)?/i, '')
+        .trim();
+    }
+    alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
+    renderAlerts();
+  }
+
+  function clearAlert(name){
+    if (alertsMap.delete(name)) renderAlerts();
+  }
+
+  // ======= Data fetchers =======
   async function fetchLatest(name){
-    const json = await fetchJSON(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
-    return json.data || null;
-  }
-
-  async function fetchRecords(name){
     try{
-      const json = await fetchJSON(`${API_BASE}/records?equipment_name=${encodeURIComponent(name)}&limit=50`);
-      return json.data || [];
-    }catch(err){
-      console.error('fetchRecords:', err);
-      alert('Could not load records for this device.');
-      return [];
+      const res = await fetch(`${API_BASE}/latest?equipment_name=${encodeURIComponent(name)}`);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { ok, data } = await res.json();
+      if (ok && data) return data;
+      return null;
+    } catch (err) {
+      console.error('latest error:', err);
+      return null;
     }
   }
 
-  // ========== UI helpers ==========
-  function setMetricsFromReading(r){
-    if(!r){
-      els.temp.textContent = els.vib.textContent = els.pres.textContent = els.hum.textContent = '--';
-      return;
-    }
-    els.temp.textContent = fmt.temp(r.temperature);
-    els.vib.textContent  = fmt.vib(r.vibration);
-    els.pres.textContent = fmt.pres(r.pressure);
-    els.hum.textContent  = fmt.hum(r.humidity);
-  }
+  async function updateSelectedCards(source='poll'){
+    const name = (sel.value || '').trim();
+    if (!name || name.startsWith('Loading') || name.startsWith('Could not')) return;
 
-  function pushAlertIfNeeded(name, reading){
-    if(!reading) return;
-    const risk = Number(reading.risk_score || 0);
-    const isFail = reading.prediction === 1 || risk >= RISK_THRESHOLD;
-    if(!isFail) return;
+    const data = await fetchLatest(name);
+    if (!data) return;
 
-    const li = document.createElement('li');
-    li.className = 'alert';
+    els.temp.textContent = fmt.temp(data.temperature);
+    els.vib .textContent = fmt.vib (data.vibration);
+    els.pres.textContent = fmt.pres(data.pressure);
+    els.hum .textContent = fmt.hum (data.humidity);
 
-    const msg = reading.message || 'High risk detected';
-    const timeStr = reading.timestamp
-      ? new Date(reading.timestamp).toLocaleString('en-US', { hour12:true })
-      : fmt.clock();
+    const risk = Number(data.risk_score || 0);
+    const prediction = Number(data.prediction || 0);
+    const timeStr = new Date(data.timestamp || Date.now()).toLocaleTimeString('en-US',{hour12:true});
 
-    li.innerHTML = `
-      <strong>${name}</strong> – ${msg}
-      <span class="time">${timeStr} • Risk: ${risk}%</span>
-    `;
-
-    alertsList.prepend(li);
-    // حد أقصى 20 تنبيه
-    while(alertsList.children.length > 20){
-      alertsList.removeChild(alertsList.lastChild);
+    if (risk >= RISK_THRESHOLD || prediction === 1) {
+      upsertAlert(name, timeStr, data.message);
+    } else {
+      clearAlert(name);
     }
   }
 
-  function renderRecords(rows){
-    if (!rows.length){
-      recordsContent.innerHTML = '<p>No records found for this device yet.</p>';
-      return;
-    }
-
-    let html = `
-      <table class="records-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Temp</th>
-            <th>Vib</th>
-            <th>Pres</th>
-            <th>Hum</th>
-            <th>Risk</th>
-            <th>Status</th>
-            <th>Message</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-
-    for(const r of rows){
-      const t = r.timestamp
-        ? new Date(r.timestamp).toLocaleTimeString('en-US', { hour12:true })
-        : '';
-      const risk = Math.round((r.probability || 0) * 100);
-      const isFail = r.prediction === 1;
-      const statusText = isFail ? 'Failure' : 'Normal';
-      const badgeClass = isFail ? 'badge-fail' : 'badge-ok';
-
-      html += `
-        <tr>
-          <td>${t}</td>
-          <td>${Number(r.temperature).toFixed(1)}</td>
-          <td>${Number(r.vibration).toFixed(2)}</td>
-          <td>${Number(r.pressure).toFixed(0)}</td>
-          <td>${Number(r.humidity).toFixed(1)}</td>
-          <td>${risk}%</td>
-          <td><span class="${badgeClass}">${statusText}</span></td>
-          <td>${r.message || ''}</td>
-        </tr>
-      `;
-    }
-
-    html += '</tbody></table>';
-    recordsContent.innerHTML = html;
-  }
-
-  async function updateSelectedCards(source){
-    const name = sel.value;
-    if(!name) return;
-    try{
-      const reading = await fetchLatest(name);
-      setMetricsFromReading(reading);
-      if(source !== 'manual-no-alert'){
-        pushAlertIfNeeded(name, reading);
+  async function refreshAlertsForAllDevices(source='poll'){
+    for (const name of devices){
+      const data = await fetchLatest(name);
+      if (!data) {
+        clearAlert(name);
+        continue;
       }
-    }catch(err){
-      console.error('updateSelectedCards:', err);
+      const risk = Number(data.risk_score || 0);
+      const prediction = Number(data.prediction || 0);
+      const timeStr = data.timestamp
+        ? new Date(data.timestamp).toLocaleTimeString('en-US',{hour12:true})
+        : fmt.clock();
+      if (risk >= RISK_THRESHOLD || prediction === 1) {
+        upsertAlert(name, timeStr, data.message);
+      } else {
+        clearAlert(name);
+      }
     }
   }
 
-  // ========== Polling ==========
+  // ======= Polling =======
   function startPolling(){
-    if(pollTimer) return;
-    pollTimer = setInterval(() => {
-      updateSelectedCards('poll');
+    if (pollTimer) return;
+    console.log('[Polling] start');
+    pollTimer = setInterval(async () => {
+      await updateSelectedCards('poll');
+      await refreshAlertsForAllDevices('poll');
     }, 5000);
   }
+
   function stopPolling(){
-    if(!pollTimer) return;
+    if (!pollTimer) return;
+    console.log('[Polling] stop');
     clearInterval(pollTimer);
     pollTimer = null;
   }
 
-  // ========== Socket.IO (اختياري) ==========
+  // ======= Socket.IO =======
   function connectSocket(){
-    if(!window.io){
-      console.warn('Socket.IO not found – using polling only');
+    if (!window.io) {
+      console.warn('Socket.IO client not loaded, falling back to polling only.');
+      usingSocket = false;
       return;
     }
-    try{
-      socket = io(API_BASE, {
-        withCredentials:false,
-        transports:['websocket','polling'],
-      });
-      socket.on('connect', () => {
-        console.log('[Socket] connected');
-      });
-      socket.on('disconnect', () => {
-        console.log('[Socket] disconnected');
-      });
-      socket.on('reading_update', payload => {
-        const { equipment_name, reading } = payload || {};
-        if(!equipment_name || !reading) return;
-        if(equipment_name === sel.value){
-          setMetricsFromReading(reading);
+
+    socket = io(API_BASE, {
+      transports:['websocket','polling'],
+      path:'/socket.io',
+    });
+
+    socket.on('connect', () => {
+      console.log('[Socket] connected');
+      usingSocket = true;
+    });
+
+    socket.on('disconnect', () => {
+      console.log('[Socket] disconnected');
+      usingSocket = false;
+    });
+
+    socket.on('reading_update', (msg) => {
+      try{
+        const name = String(msg?.equipment_name || '').trim();
+        if (!name) return;
+
+        const selected = (sel.value || '').trim();
+        const incoming = name;
+
+        if (selected && incoming === selected) {
+          els.temp.textContent = fmt.temp(msg.temperature);
+          els.vib .textContent = fmt.vib (msg.vibration);
+          els.pres.textContent = fmt.pres(msg.pressure);
+          if (msg.humidity !== undefined) {
+            els.hum.textContent  = fmt.hum(msg.humidity);
+          }
         }
-        pushAlertIfNeeded(equipment_name, reading);
-      });
-    }catch(err){
-      console.error('socket error:', err);
-    }
+
+        const risk = Number(msg?.risk_score || 0);
+        const timeStr = msg?.date || fmt.clock();
+        if (risk >= RISK_THRESHOLD) {
+          upsertAlert(name, timeStr, msg?.message);
+        } else {
+          clearAlert(name);
+        }
+      } catch(err){
+        console.error('[Socket] handler error:', err);
+      }
+    });
   }
 
-  // ========== Event handlers ==========
+  // ======= Boot =======
+  async function loadDevices() {
+    const setOpt = (txt) => sel.innerHTML = `<option disabled selected>${txt}</option>`;
+
+    for (let i = 1; i <= 5; i++){
+      try {
+        const res = await fetch(`${API_BASE}/equipment`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { ok, equipment } = await res.json();
+        if (!ok) throw new Error('Backend returned ok:false');
+        devices = equipment || [];
+        if (!devices.length) throw new Error('No equipment in DB');
+
+        sel.innerHTML = devices
+          .map((name, idx) =>
+            `<option value="${name}" ${idx===0?'selected':''}>${name}</option>`
+          ).join('');
+
+        await updateSelectedCards('initial');
+        await refreshAlertsForAllDevices('initial');
+        return;
+      } catch (e) {
+        console.warn(`[loadDevices] try ${i} failed:`, e?.message || e);
+        setOpt(i === 1 ? 'Warming up server…' : `Retrying… (${i}/5)`);
+        await new Promise(r => setTimeout(r, i * 1000));
+      }
+    }
+
+    setOpt('Could not load devices (server waking up)…');
+  }
+
   sel.addEventListener('change', async () => {
-    els.temp.textContent = els.vib.textContent = els.pres.textContent = els.hum.textContent = '--';
-    recordsPanel.classList.add('hidden');
-    recordsVisible = false;
-    recordsBtn.textContent = 'Show Records';
+    els.temp.textContent = els.vib.textContent =
+      els.pres.textContent = els.hum.textContent = '--';
     await updateSelectedCards('select-change');
-  });
-
-  simBtn.addEventListener('click', async () => {
-    if(!simRunning){
-      simRunning = true;
-      simBtn.textContent = 'Stop Simulation';
-      await updateSelectedCards('manual-no-alert');
-      startPolling();
-    }else{
-      simRunning = false;
-      simBtn.textContent = 'Start Simulation';
-      stopPolling();
-    }
-  });
-
-  recordsBtn.addEventListener('click', async () => {
-    const name = sel.value;
-    if(!name){
-      alert('Please select a device first.');
-      return;
-    }
-
-    if(!recordsVisible){
-      recordsBtn.disabled = true;
-      recordsBtn.textContent = 'Loading…';
-      const rows = await fetchRecords(name);
-      renderRecords(rows);
-      recordsPanel.classList.remove('hidden');
-      recordsVisible = true;
-      recordsBtn.disabled = false;
-      recordsBtn.textContent = 'Hide Records';
-    }else{
-      recordsPanel.classList.add('hidden');
-      recordsVisible = false;
-      recordsBtn.textContent = 'Show Records';
+    if (recordsVisible){
+      fetchRecordsForSelected();
     }
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
     await loadDevices();
-    connectSocket();  // يعمل لو مفعّل في الباك إند
+    connectSocket();
+    startPolling();
   });
-</script>
+  </script>
 </body>
 </html>
