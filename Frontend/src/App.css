@@ -337,3 +337,25 @@ select {
   }
 }
 
+.records-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .5rem 0;
+}
+
+.records-filter {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.records-filter select {
+  padding: .35rem .6rem;
+  border-radius: .5rem;
+  border: 1px solid var(--ring);
+  background: var(--card);
+  color: var(--ink);
+  font-size: .9rem;
+  cursor: pointer;
+}
