@@ -34,7 +34,7 @@ function App() {
     let simRunning = false;
     let pollTimer = null;
 
-    // نخزن كل الريكوردات هنا عشان الفلترة
+    
     let allRecords = [];
 
     // ======== Records table ========
@@ -94,7 +94,7 @@ function App() {
         </div>`;
     }
 
-    // تطبق الفلتر (all / failure / normal) وترسم الجدول
+    
     function applyRecordsFilterAndRender() {
       if (!allRecords || !allRecords.length) {
         renderRecordsTable([]);
@@ -122,7 +122,7 @@ function App() {
       }
 
       try {
-        // ✅ بدون limit → يرجع كل الهيستوري (إلا إذا الباك إند يحدّد من نفسه)
+        
         const res = await fetch(
           `${API_BASE}/records?equipment_name=${encodeURIComponent(name)}`
         );
@@ -224,7 +224,7 @@ function App() {
       await fetchRecordsForSelected();
     }
 
-    // ======== Refresh alerts for all devices (يتجاهل الجهاز المختار) ========
+    // ======== Refresh alerts for all devices ========
     async function refreshAlertsForAllDevices() {
       const selected = (sel.value || "").trim();
 
@@ -354,7 +354,7 @@ function App() {
       startPolling();
     })();
 
-    // اختيارياً: تنظيف الـ interval لو خرجنا من الصفحة (لو تبي)
+    
     return () => {
       if (pollTimer) clearInterval(pollTimer);
     };
