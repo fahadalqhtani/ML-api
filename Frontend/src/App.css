@@ -336,15 +336,4 @@ select {
     gap: 1rem;
   }
 }
-.risk-multi-wrapper {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--ring);
-}
 
-.risk-multi-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--muted);
-}
