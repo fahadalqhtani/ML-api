@@ -200,7 +200,7 @@ select {
 
 #alertsList {
   flex: 1;
-  overflow-y: scroll;      
+  overflow-y: auto;      
   padding-right: 0.4rem;
 }
 
