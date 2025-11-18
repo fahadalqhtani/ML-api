@@ -41,7 +41,8 @@ body {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 1.5rem;
-  align-items: flex-start; /* عشان البانلات تطلع من أعلى مو بالنص */
+  /* نرجّع التمدد الطبيعي عشان البانل اليمين نفس ارتفاع اليسار */
+  align-items: stretch;
 }
 
 @media (max-width:980px) {
@@ -186,9 +187,7 @@ select {
   background: var(--alert-bg);
   display: flex;
   flex-direction: column;
-  max-height: 420px;   /* ارتفاع ثابت تقريبا للـ Active Alerts */
-  min-height: 260px;
-  overflow: hidden;    /* يمنع تمدد البوكس نفسه، السكروول يكون داخل القائمة */
+  max-height: 420px;
 }
 
 .alerts h2 {
@@ -200,8 +199,8 @@ select {
 
 #alertsList {
   flex: 1;
-  overflow-y: auto;    /* السكروول هنا */
-  padding-right: 0.4rem; /* مساحة صغيرة عشان شريط السكروول ما يلصق في الحافة */
+  overflow-y: scroll;      
+  padding-right: 0.4rem;
 }
 
 .alert-empty {
