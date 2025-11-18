@@ -31,7 +31,7 @@ DATABASE_URL = _with_sslmode_require(os.getenv("DATABASE_URL", ""))
 if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
-# ✅ ExtraTrees model path (تأكد الاسم موجود في الريبو)
+
 MODEL_PATH     = os.getenv("MODEL_PATH", "best_et_fold_optuna_model.pkl")
 RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
 TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
@@ -129,7 +129,7 @@ def parse_timestamp(ts_str: str) -> datetime:
             pass
     return datetime.utcnow()
 
-# ✅ model input: [temp, pressure, vibration, humidity, equipment_code]
+#  model input: [temp, pressure, vibration, humidity, equipment_code]
 def compute_risk_score(temperature, vibration, pressure, humidity, equipment_code) -> int:
     """Use the trained model to produce a failure probability in %."""
     X = np.array(
@@ -302,11 +302,11 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
 # Simulation
 # ===================================================
 
-# متغيرات التحكم في السيموليشن
+
 _SIM_TASK = None
 _SIM_RUNNING = False
 
-# ✅ نحتفظ بالـ cycles عالميًا عشان تكمل من حيث توقفت
+
 _SIM_GROUPS = {}   # code -> itertools.cycle([...])
 _SIM_CODES  = []   # list of codes المتاحة
 
@@ -315,7 +315,7 @@ def _init_sim_groups(csv_path: str = TEST_CSV_PATH):
     global _SIM_GROUPS, _SIM_CODES
 
     if _SIM_GROUPS:
-        # سبق الإعداد → لا تعِد التحميل، نستخدم نفس الـ cycles
+       
         return
 
     print(f"📄 Initializing simulation groups from: {csv_path}")
@@ -360,13 +360,10 @@ def _init_sim_groups(csv_path: str = TEST_CSV_PATH):
     except Exception as e:
         print("DB warmup error:", e)
 
-    print(f"✅ Simulation groups ready: codes={_SIM_CODES}")
+    print(f" Simulation groups ready: codes={_SIM_CODES}")
 
 def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = SIM_INTERVAL):
-    """Simulate readings periodically from CSV (يتوقف إذا _SIM_RUNNING = False).
-
-    يستخدم global cycles حتى لو وقفنا التشغيل ثم شغلناه يكمل من آخر نقطة.
-    """
+   
     global _SIM_RUNNING, _SIM_GROUPS, _SIM_CODES
 
     print(f"📡 Simulation loop starting (interval={interval}s)")
@@ -395,20 +392,20 @@ def simulate_from_csv_triplet(csv_path: str = TEST_CSV_PATH, interval: float = S
                 upsert_and_insert_reading(name, datetime.utcnow(), temp, vib, pres, hum, risk)
 
             except Exception as e:
-                print(f"⚠️ Simulation error for code={code}: {e}")
+                print(f" Simulation error for code={code}: {e}")
                 continue
 
         eventlet.sleep(interval)
 
-    print("⏹ Simulation stopped.")
+    print(" Simulation stopped.")
 
 def start_simulation():
-    """تشغيل السيموليشن (يُستدعى من الراوت /simulation/start)."""
+    
     global _SIM_TASK, _SIM_RUNNING
     if _SIM_RUNNING:
         return False
 
-    # تأكد أن الـ cycles مهيئة (مرة واحدة فقط)
+    
     _init_sim_groups(TEST_CSV_PATH)
 
     if not _SIM_GROUPS:
@@ -425,7 +422,7 @@ def start_simulation():
     return True
 
 def stop_simulation():
-    """إيقاف السيموليشن (تغيير الفلاغ فقط، اللوب يخرج بنفسه)."""
+   
     global _SIM_RUNNING
     if not _SIM_RUNNING:
         return False
@@ -463,7 +460,7 @@ def root():
         "simulation_running": _SIM_RUNNING,
     }), 200
 
-# 🔴 زر Start / Stop في الفرونت يستخدم هذه الراوتات:
+
 @app.post("/simulation/start")
 def api_sim_start():
     started = start_simulation()
@@ -562,18 +559,17 @@ def records():
     if not name:
         return jsonify({"ok": False, "error": "equipment_name is required"}), 400
 
-    # نحاول نقرأ الـ limit لو موجود
+    
     limit = None
     if limit_str is not None:
         try:
             limit = int(limit_str)
-            # اختياري: تحط حد أقصى لو تخاف من عدد ضخم جداً
-            # limit = max(1, min(limit, 1000))
+           
         except ValueError:
-            limit = None  # لو خربانة، نتجاهلها ونرجّع كل شيء
+            limit = None  
 
     try:
-        # نبني الـ SQL حسب وجود الـ limit أو لا
+        
         base_sql = """
             SELECT
                 r.temperature,
