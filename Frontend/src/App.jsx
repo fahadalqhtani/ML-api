@@ -11,6 +11,7 @@ function App() {
     const alertsList = document.getElementById("alertsList");
     const simBtn = document.getElementById("simBtn");
     const recordsContent = document.getElementById("recordsContent");
+    const filterSel = document.getElementById("filterSelect");
 
     const els = {
       temp: document.getElementById("tempVal"),
@@ -32,6 +33,9 @@ function App() {
     const alertsMap = new Map();
     let simRunning = false;
     let pollTimer = null;
+
+    // نخزن كل الريكوردات هنا عشان الفلترة
+    let allRecords = [];
 
     // ======== Records table ========
     function renderRecordsTable(rows) {
@@ -90,6 +94,25 @@ function App() {
         </div>`;
     }
 
+    // تطبق الفلتر (all / failure / normal) وترسم الجدول
+    function applyRecordsFilterAndRender() {
+      if (!allRecords || !allRecords.length) {
+        renderRecordsTable([]);
+        return;
+      }
+
+      const mode = (filterSel?.value || "all");
+
+      let rows = allRecords;
+      if (mode === "failure") {
+        rows = allRecords.filter((r) => Number(r.prediction) === 1);
+      } else if (mode === "normal") {
+        rows = allRecords.filter((r) => Number(r.prediction) === 0);
+      }
+
+      renderRecordsTable(rows);
+    }
+
     async function fetchRecordsForSelected() {
       const name = (sel.value || "").trim();
       if (!name || name.startsWith("Loading") || name.startsWith("Could not")) {
@@ -99,15 +122,15 @@ function App() {
       }
 
       try {
+        // ✅ بدون limit → يرجع كل الهيستوري (إلا إذا الباك إند يحدّد من نفسه)
         const res = await fetch(
-          `${API_BASE}/records?equipment_name=${encodeURIComponent(
-            name
-          )}&limit=50`
+          `${API_BASE}/records?equipment_name=${encodeURIComponent(name)}`
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { ok, data } = await res.json();
         if (ok) {
-          renderRecordsTable(data || []);
+          allRecords = data || [];
+          applyRecordsFilterAndRender();
         } else {
           recordsContent.innerHTML =
             '<p style="margin:0;color:var(--muted);font-size:.9rem;">Could not load records.</p>';
@@ -232,8 +255,8 @@ function App() {
     function startPolling() {
       if (pollTimer) return;
       pollTimer = setInterval(async () => {
-        await updateSelectedCards("poll");      // يحدّث الجهاز المختار
-        await refreshAlertsForAllDevices();     // يحدّث باقي الأجهزة فقط
+        await updateSelectedCards("poll"); // يحدّث الجهاز المختار
+        await refreshAlertsForAllDevices(); // يحدّث باقي الأجهزة فقط
       }, 5000);
     }
 
@@ -319,11 +342,22 @@ function App() {
       });
     }
 
+    if (filterSel) {
+      filterSel.addEventListener("change", () => {
+        applyRecordsFilterAndRender();
+      });
+    }
+
     // === init ===
     (async () => {
       await loadDevices();
       startPolling();
     })();
+
+    // اختيارياً: تنظيف الـ interval لو خرجنا من الصفحة (لو تبي)
+    return () => {
+      if (pollTimer) clearInterval(pollTimer);
+    };
   }, []);
 
   return (
@@ -387,11 +421,24 @@ function App() {
         aria-label="Recorded readings"
       >
         <div className="records-header">
-          <h3>Recorded Readings &amp; Failures</h3>
-          <p className="records-sub">
-            Shows last 50 records for the selected equipment (from Postgres /
-            prediction table).
-          </p>
+          <div>
+            <h3>Recorded Readings &amp; Failures</h3>
+            <p className="records-sub">
+              Shows all records for the selected equipment (from Postgres /
+              prediction table).
+            </p>
+          </div>
+
+          <div className="records-filter">
+            <label htmlFor="filterSelect" style={{ marginRight: "0.5rem" }}>
+              Show:
+            </label>
+            <select id="filterSelect" defaultValue="all">
+              <option value="all">All</option>
+              <option value="failure">Failures only</option>
+              <option value="normal">Normal only</option>
+            </select>
+          </div>
         </div>
         <div id="recordsContent" className="records-scroll"></div>
       </section>
