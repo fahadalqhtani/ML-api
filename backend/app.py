@@ -555,36 +555,48 @@ def latest():
  
 @app.get("/records")
 def records():
-    """Return last N readings + prediction info for a specific equipment."""
+    """Return readings + prediction info for a specific equipment."""
     name = request.args.get("equipment_name", "").strip()
-    limit_str = request.args.get("limit", "50")
+    limit_str = request.args.get("limit")  # 👈 بدون قيمة افتراضية
 
     if not name:
         return jsonify({"ok": False, "error": "equipment_name is required"}), 400
 
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        limit = 50
+    # نحاول نقرأ الـ limit لو موجود
+    limit = None
+    if limit_str is not None:
+        try:
+            limit = int(limit_str)
+            # اختياري: تحط حد أقصى لو تخاف من عدد ضخم جداً
+            # limit = max(1, min(limit, 1000))
+        except ValueError:
+            limit = None  # لو خربانة، نتجاهلها ونرجّع كل شيء
 
     try:
+        # نبني الـ SQL حسب وجود الـ limit أو لا
+        base_sql = """
+            SELECT
+                r.temperature,
+                r.vibration,
+                r.pressure,
+                r.humidity,
+                r.timestamp,
+                p.prediction,
+                p.probability,
+                p.message
+            FROM reading r
+            JOIN prediction p ON p.reading_id = r.id
+            WHERE r.equipment_name = :name
+            ORDER BY r.id DESC
+        """
+
+        params = {"name": name}
+        if limit is not None:
+            base_sql += " LIMIT :limit"
+            params["limit"] = limit
+
         with engine.begin() as conn:
-            rows = conn.execute(text("""
-                SELECT
-                    r.temperature,
-                    r.vibration,
-                    r.pressure,
-                    r.humidity,
-                    r.timestamp,
-                    p.prediction,
-                    p.probability,
-                    p.message
-                FROM reading r
-                JOIN prediction p ON p.reading_id = r.id
-                WHERE r.equipment_name = :name
-                ORDER BY r.id DESC
-                LIMIT :limit
-            """), {"name": name, "limit": limit}).mappings().all()
+            rows = conn.execute(text(base_sql), params).mappings().all()
 
         data = []
         for row in rows:
@@ -603,6 +615,7 @@ def records():
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
    
       
 
