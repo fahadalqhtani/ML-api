@@ -1,6 +1,30 @@
 import { useEffect } from "react";
 import "./App.css";
 
+// ====== Chart.js for multi-line risk chart ======
+import {
+  Chart,
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Title,
+  Tooltip,
+  Legend,
+} from "chart.js";
+
+Chart.register(
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Title,
+  Tooltip,
+  Legend
+);
+
 function App() {
   useEffect(() => {
     // ======== CONFIG ========
@@ -32,6 +56,101 @@ function App() {
     const alertsMap = new Map();
     let simRunning = false;
     let pollTimer = null;
+
+    // ======== Multi-line risk chart state ========
+    // لكل جهاز نخزّن تاريخ الـ risk (آخر نقاط)
+    const riskHistory = new Map(); // key: device name, value: array of risk values
+    let multiLineChart = null;
+
+    function pushRiskHistory(device, risk) {
+      if (!riskHistory.has(device)) {
+        riskHistory.set(device, []);
+      }
+      const arr = riskHistory.get(device);
+      arr.push(risk);
+      // خزن آخر 10 نقاط فقط
+      if (arr.length > 10) arr.shift();
+    }
+
+    function renderMultiLineChart() {
+      const canvas = document.getElementById("riskChartMulti");
+      if (!canvas) return;
+
+      const entries = Array.from(riskHistory.entries());
+      if (!entries.length) {
+        if (multiLineChart) {
+          multiLineChart.destroy();
+          multiLineChart = null;
+        }
+        return;
+      }
+
+      const maxLen = Math.max(...entries.map(([, arr]) => arr.length));
+      if (!maxLen) return;
+
+      const labels = Array.from({ length: maxLen }, (_, i) => `T-${maxLen - i}`);
+
+      const datasets = entries.map(([device, arr], idx) => {
+        const padded = Array(maxLen - arr.length).fill(null).concat(arr);
+        const hue = (idx * 70) % 360;
+        return {
+          label: device,
+          data: padded,
+          borderColor: `hsl(${hue}, 70%, 45%)`,
+          backgroundColor: `hsl(${hue}, 70%, 85%)`,
+          borderWidth: 2,
+          tension: 0.3,
+          spanGaps: true,
+          pointRadius: 3,
+        };
+      });
+
+      if (multiLineChart) {
+        multiLineChart.data.labels = labels;
+        multiLineChart.data.datasets = datasets;
+        multiLineChart.update();
+        return;
+      }
+
+      multiLineChart = new Chart(canvas.getContext("2d"), {
+        type: "line",
+        data: {
+          labels,
+          datasets,
+        },
+        options: {
+          responsive: true,
+          interaction: { mode: "nearest", intersect: false },
+          plugins: {
+            legend: {
+              display: true,
+              position: "bottom",
+            },
+            title: {
+              display: false,
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const dev = ctx.dataset.label || "";
+                  const val = ctx.parsed.y;
+                  return `${dev}: ${val?.toFixed(0)}%`;
+                },
+              },
+            },
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              ticks: {
+                callback: (v) => `${v}%`,
+              },
+            },
+          },
+        },
+      });
+    }
 
     // ======== Records table ========
     function renderRecordsTable(rows) {
@@ -68,8 +187,7 @@ function App() {
           });
 
           return `
-          <tr class="${Number(r.prediction) === 1 ? "row-fail" : ""
-            }">
+          <tr class="${Number(r.prediction) === 1 ? "row-fail" : ""}">
             <td>${timeStr}</td>
             <td>${Number(r.temperature).toFixed(1)}</td>
             <td>${Number(r.vibration).toFixed(2)}</td>
@@ -141,8 +259,7 @@ function App() {
           <div class="alert-header">
             <span class="alert-pill">WARNING</span>
           </div>
-          <p class="alert-msg">${a.message || "Abnormal condition detected."
-            }</p>
+          <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
           <span class="time">${a.time}</span>
         `;
           alertsList.appendChild(div);
@@ -194,16 +311,22 @@ function App() {
         { hour12: true }
       );
 
+      // ✅ خزّن الـ risk للجهاز المختار
+      pushRiskHistory(name, risk);
+
       if (risk >= RISK_THRESHOLD || prediction === 1) {
         upsertAlert(name, timeStr, data.message);
       } else {
         clearAlert(name);
       }
 
+      // حدّث جدول القراءات
       await fetchRecordsForSelected();
+      // وحدث الشارت بعد التحديث
+      renderMultiLineChart();
     }
 
-    // ✅ هنا التعديل: نتجاهل الجهاز المختار حتى لا نطلبه مرتين
+    // ======== Alerts refresh for all devices (بدون الجهاز المختار) ========
     async function refreshAlertsForAllDevices() {
       const selected = (sel.value || "").trim();
 
@@ -220,15 +343,22 @@ function App() {
         const prediction = Number(data.prediction || 0);
         const timeStr = data.timestamp
           ? new Date(data.timestamp).toLocaleTimeString("en-US", {
-            hour12: true,
-          })
+              hour12: true,
+            })
           : fmt.clock();
+
+        // ✅ خزّن تاريخ الـ risk لكل جهاز
+        pushRiskHistory(name, risk);
+
         if (risk >= RISK_THRESHOLD || prediction === 1) {
           upsertAlert(name, timeStr, data.message);
         } else {
           clearAlert(name);
         }
       }
+
+      // ✅ حدّث الشارت بعد ما نحدّث كل الأجهزة
+      renderMultiLineChart();
     }
 
     // ======== Polling ========
@@ -292,7 +422,8 @@ function App() {
           sel.innerHTML = devices
             .map(
               (name, idx) =>
-                `<option value="${name}" ${idx === 0 ? "selected" : ""
+                `<option value="${name}" ${
+                  idx === 0 ? "selected" : ""
                 }>${name}</option>`
             )
             .join("");
@@ -382,7 +513,7 @@ function App() {
         </aside>
       </div>
 
-      {/* Records panel */}
+      {/* Records + chart panel */}
       <section
         id="recordsPanel"
         className="records"
@@ -396,6 +527,12 @@ function App() {
           </p>
         </div>
         <div id="recordsContent" className="records-scroll"></div>
+
+        {/* Multi-line chart لكل الأجهزة */}
+        <div className="risk-multi-wrapper">
+          <h4 className="risk-multi-title">Risk Trend (All Devices)</h4>
+          <canvas id="riskChartMulti" height="140"></canvas>
+        </div>
       </section>
     </>
   );
