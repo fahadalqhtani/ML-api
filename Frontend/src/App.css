@@ -188,6 +188,7 @@ select {
   display: flex;
   flex-direction: column;
   max-height: 420px;
+  min-height: 420px;
 }
 
 .alerts h2 {
