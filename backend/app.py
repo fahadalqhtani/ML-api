@@ -32,7 +32,7 @@ if not DATABASE_URL:
     raise RuntimeError("Missing DATABASE_URL. Set it in your environment.")
 
 
-MODEL_PATH     = os.getenv("MODEL_PATH", "best_et_fold_optuna_model.pkl")
+MODEL_PATH     = os.getenv("MODEL_PATH", "best_xgb_fold_model.pkl")
 RISK_THRESHOLD = int(os.getenv("RISK_THRESHOLD", "85"))  # percentage
 TEST_CSV_PATH  = os.getenv("TEST_CSV_PATH", "test.csv")
 SIM_INTERVAL   = float(os.getenv("SIM_INTERVAL", "5"))   # seconds
