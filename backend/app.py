@@ -499,10 +499,11 @@ def ingest():
         return jsonify({"ok": False, "error": f"Invalid input: {e}"}), 400
 
     risk_score = compute_risk_score(temperature, vibration, pressure, humidity, code)
-    upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score)
+    saved=upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score)
 
     return jsonify({
         "ok": True,
+        "db_stored":saved,
         "data": {
             "date": ts.strftime("%Y/%m/%d %H:%M:%S"),
             "equipment_name": name,
