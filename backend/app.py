@@ -229,74 +229,84 @@ def build_warning_message_multi(device_name: str, causes: list, cur_values: dict
 # --------------------------------------------------
 
 def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score):
-    """Insert reading + prediction into DB (with SHAP message if applicable) and emit to frontend."""
-    failurety = 1 if risk_score >= RISK_THRESHOLD else 0
-    ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
+    """Insert reading + prediction into DB and emit to frontend.
+       Returns True on success, False on failure.
+    """
+    try:
+        failurety = 1 if risk_score >= RISK_THRESHOLD else 0
+        ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
-    message = None
-    if failurety == 1:
-        code = equipment_code_from_name(name)
-        causes = shap_top_causes(temperature, vibration, pressure, humidity, code)
-        if causes:
-            cur_vals = {
-                "temperature": float(temperature),
-                "pressure": float(pressure),
-                "vibration": float(vibration),
-                "humidity": float(humidity),
-            }
-            message = build_warning_message_multi(name, causes, cur_vals)
+        message = None
+        if failurety == 1:
+            code = equipment_code_from_name(name)
+            causes = shap_top_causes(temperature, vibration, pressure, humidity, code)
+            if causes:
+                cur_vals = {
+                    "temperature": float(temperature),
+                    "pressure": float(pressure),
+                    "vibration": float(vibration),
+                    "humidity": float(humidity),
+                }
+                message = build_warning_message_multi(name, causes, cur_vals)
 
-    with engine.begin() as conn:
-        # Ensure equipment exists
-        conn.execute(
-            text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
-            {"name": name},
-        )
-        # Insert reading
-        reading_id = conn.execute(
-            text("""
-                INSERT INTO reading (equipment_name, temperature, pressure, vibration, humidity, timestamp)
-                VALUES (:equipment_name, :temperature, :pressure, :vibration, :humidity, :timestamp)
-                RETURNING id
-            """),
-            {
-                "equipment_name": name,
-                "temperature": float(temperature),
-                "pressure": float(pressure),
-                "vibration": float(vibration),
-                "humidity": float(humidity),
-                "timestamp": ts_db,
-            },
-        ).scalar_one()
+        with engine.begin() as conn:
+            # Ensure equipment exists
+            conn.execute(
+                text("INSERT INTO equipment (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
+                {"name": name},
+            )
+            # Insert reading
+            reading_id = conn.execute(
+                text("""
+                    INSERT INTO reading (equipment_name, temperature, pressure, vibration, humidity, timestamp)
+                    VALUES (:equipment_name, :temperature, :pressure, :vibration, :humidity, :timestamp)
+                    RETURNING id
+                """),
+                {
+                    "equipment_name": name,
+                    "temperature": float(temperature),
+                    "pressure": float(pressure),
+                    "vibration": float(vibration),
+                    "humidity": float(humidity),
+                    "timestamp": ts_db,
+                },
+            ).scalar_one()
 
-        # Insert prediction + message
-        conn.execute(
-            text("""
-                INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
-                VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
-            """),
-            {
-                "reading_id": reading_id,
-                "prediction": failurety,
-                "probability": risk_score / 100.0,
-                "timestamp": ts_db,
-                "message": message,
-            },
-        )
+            # Insert prediction
+            conn.execute(
+                text("""
+                    INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
+                    VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
+                """),
+                {
+                    "reading_id": reading_id,
+                    "prediction": failurety,
+                    "probability": risk_score / 100.0,
+                    "timestamp": ts_db,
+                    "message": message,
+                },
+            )
 
-    # Emit to frontend
-    payload = {
-        "date": ts.strftime("%H:%M:%S"),
-        "equipment_name": name,
-        "temperature": float(temperature),
-        "vibration": float(vibration),
-        "pressure": float(pressure),
-        "humidity": float(humidity),
-        "risk_score": int(risk_score),
-    }
-    if message:
-        payload["message"] = message
-    socketio.emit("reading_update", payload)
+        # Emit socket event
+        payload = {
+            "date": ts.strftime("%H:%M:%S"),
+            "equipment_name": name,
+            "temperature": float(temperature),
+            "vibration": float(vibration),
+            "pressure": float(pressure),
+            "humidity": float(humidity),
+            "risk_score": int(risk_score),
+        }
+        if message:
+            payload["message"] = message
+        socketio.emit("reading_update", payload)
+
+        return True   # SUCCESS
+
+    except Exception as e:
+        print("DB error:", e)
+        return False  # FAILURE
+
 
 # ===================================================
 # Simulation
