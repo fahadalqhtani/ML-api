@@ -99,6 +99,19 @@ except Exception:
     # keep None if anything goes wrong
     pass
 
+
+# ===================================================
+# Sensor bounds for detecting faulty readings
+# ===================================================
+
+SENSOR_BOUNDS = {
+    "temperature": (-10, 200),   
+    "pressure": (0, 150),     
+    "vibration": (0, 8),       
+    "humidity": (0, 100),      
+}
+
+
 def feature_direction(feature: str, value: float) -> str:
     """Return 'high' or 'low' against a global median; falls back to 'abnormal'."""
     base = GLOBAL_BASELINE.get(feature)
@@ -109,6 +122,63 @@ def feature_direction(feature: str, value: float) -> str:
 # ===================================================
 # Utility Functions
 # ===================================================
+
+def detect_sensor_fault(temperature, vibration, pressure, humidity):
+    """
+    Check if any sensor value is outside the physical range.
+    Returns a list of issues: each is {sensor, value, min, max}.
+    """
+    values = {
+        "temperature": float(temperature),
+        "vibration": float(vibration),
+        "pressure": float(pressure),
+        "humidity": float(humidity),
+    }
+
+    issues = []
+    for sensor, value in values.items():
+        bounds = SENSOR_BOUNDS.get(sensor)
+        if not bounds:
+            continue
+        lo, hi = bounds
+        if value < lo or value > hi:
+            issues.append({
+                "sensor": sensor,
+                "value": value,
+                "min": lo,
+                "max": hi,
+            })
+    return issues
+
+
+def build_sensor_fault_message(issues, equipment_name: str) -> str:
+    """
+    Build a readable message listing the faulty sensors.
+    """
+    if not issues:
+        return ""
+
+    labels = {
+        "temperature": "temperature",
+        "pressure": "pressure",
+        "vibration": "vibration",
+        "humidity": "humidity",
+    }
+
+    parts = [labels.get(i["sensor"], i["sensor"]) for i in issues]
+
+    if len(parts) == 1:
+        sensors_text = parts[0]
+    elif len(parts) == 2:
+        sensors_text = " and ".join(parts)
+    else:
+        sensors_text = ", ".join(parts[:-1]) + " and " + parts[-1]
+
+    return (
+        f"Abnormal {sensors_text} readings detected on {equipment_name}. "
+        "Please check sensor installation and calibration."
+    )
+
 
 def equipment_code_from_name(name: str) -> int:
     n = name.lower().strip()
@@ -501,19 +571,64 @@ def ingest():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Invalid input: {e}"}), 400
 
+    # أولاً: نشيك هل في Sensor Fault (قيم خارج الحدود الفيزيائية)
+    issues = detect_sensor_fault(temperature, vibration, pressure, humidity)
+    if issues:
+        # Sensor error case
+        msg = build_sensor_fault_message(issues, name)
+        saved = upsert_and_insert_reading(
+            name,
+            ts,
+            temperature,
+            vibration,
+            pressure,
+            humidity,
+            risk_score=0,
+            sensor_error=True,
+            sensor_message=msg,
+        )
+
+        if not saved:
+            return jsonify({
+                "ok": False,
+                "sensor_error": True,
+                "db_stored": False,
+                "invalid_sensors": [i["sensor"] for i in issues],
+                "error": "Failed to store sensor fault reading in the database.",
+            }), 500
+
+        return jsonify({
+            "ok": False,
+            "sensor_error": True,
+            "db_stored": True,
+            "invalid_sensors": [i["sensor"] for i in issues],
+            "error": msg,
+        }), 400
+
+    # لو القيم طبيعية: نستخدم المودل كالمعتاد
     risk_score = compute_risk_score(temperature, vibration, pressure, humidity, code)
-    saved=upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score)
-    
+    saved = upsert_and_insert_reading(
+        name,
+        ts,
+        temperature,
+        vibration,
+        pressure,
+        humidity,
+        risk_score=risk_score,
+        sensor_error=False,
+    )
+
     if not saved:
         return jsonify({
             "ok": False,
             "db_stored": False,
-            "error": "Failed to store reading in the database. The equipment may be unknown or a database error occurred."
-        }), 400 
+            "error": "Failed to store reading in the database. The equipment may be unknown or a database error occurred.",
+        }), 500
 
     return jsonify({
         "ok": True,
-        "db_stored":True,
+        "db_stored": True,
+        "sensor_error": False,
         "data": {
             "date": ts.strftime("%Y/%m/%d %H:%M:%S"),
             "equipment_name": name,
@@ -525,6 +640,7 @@ def ingest():
             "failurety": 1 if risk_score >= RISK_THRESHOLD else 0
         }
     }), 200
+
 
 @app.get("/equipment")
 def list_equipment():
@@ -545,7 +661,7 @@ def latest():
         with engine.begin() as conn:
             row = conn.execute(text("""
                 SELECT r.temperature, r.vibration, r.pressure, r.humidity, r.timestamp,
-                       p.probability, p.prediction, p.message
+                       p.probability, p.prediction, p.message, p.sensor_error
                 FROM reading r
                 JOIN prediction p ON p.reading_id = r.id
                 WHERE r.equipment_name = :name
@@ -565,10 +681,12 @@ def latest():
             "risk_score": round(float(row["probability"]) * 100),
             "prediction": int(row["prediction"]),
             "message": row["message"],
+            "sensor_error": bool(row["sensor_error"]),
         }
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
  
 @app.get("/records")
@@ -600,7 +718,8 @@ def records():
                 r.timestamp,
                 p.prediction,
                 p.probability,
-                p.message
+                p.message,
+                p.sensor_error
             FROM reading r
             JOIN prediction p ON p.reading_id = r.id
             WHERE r.equipment_name = :name
@@ -626,6 +745,7 @@ def records():
                 "prediction": int(row["prediction"]),
                 "probability": float(row["probability"]),
                 "message": row["message"],
+                "sensor_error": bool(row["sensor_error"]),
             })
 
         return jsonify({"ok": True, "data": data}), 200
