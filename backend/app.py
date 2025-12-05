@@ -298,36 +298,63 @@ def build_warning_message_multi(device_name: str, causes: list, cur_values: dict
 
 # --------------------------------------------------
 
-def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score):
-    """Insert reading + prediction into DB and emit to frontend.
-       Returns True on success, False on failure.
+def upsert_and_insert_reading(
+    name,
+    ts,
+    temperature,
+    vibration,
+    pressure,
+    humidity,
+    risk_score=None,
+    sensor_error: bool = False,
+    sensor_message: str | None = None,
+):
+    """
+    Insert reading + prediction into DB and emit to frontend.
+    - إذا sensor_error = True نخزنها كسطر خطأ سينسر (بدون استخدام المودل أو SHAP).
+    - نرجع True لو التخزين نجح، False لو فشل.
     """
     try:
-        failurety = 1 if risk_score >= RISK_THRESHOLD else 0
         ts_db = ts.strftime("%Y-%m-%d %H:%M:%S")
 
-        message = None
-        if failurety == 1:
-            code = equipment_code_from_name(name)
-            causes = shap_top_causes(temperature, vibration, pressure, humidity, code)
-            if causes:
-                cur_vals = {
-                    "temperature": float(temperature),
-                    "pressure": float(pressure),
-                    "vibration": float(vibration),
-                    "humidity": float(humidity),
-                }
-                message = build_warning_message_multi(name, causes, cur_vals)
+        # ========= تجهيز رسالة و prediction / probability =========
+        if sensor_error:
+            failurety = None          # ما في تنبؤ
+            probability = None
+            message = sensor_message  # رسالة خطأ السينسر الجاهزة
+        else:
+            # حالة عادية: نستخدم الـ risk_score
+            if risk_score is None:
+                raise ValueError("risk_score is required when sensor_error=False")
+
+            failurety = 1 if risk_score >= RISK_THRESHOLD else 0
+            probability = risk_score / 100.0
+            message = None
+
+            # لو failure حقيقي نستخدم SHAP لبناء رسالة السبب
+            if failurety == 1:
+                code = equipment_code_from_name(name)
+                causes = shap_top_causes(temperature, vibration, pressure, humidity, code)
+                if causes:
+                    cur_vals = {
+                        "temperature": float(temperature),
+                        "pressure": float(pressure),
+                        "vibration": float(vibration),
+                        "humidity": float(humidity),
+                    }
+                    message = build_warning_message_multi(name, causes, cur_vals)
 
         with engine.begin() as conn:
+            # لازم الجهاز يكون موجود مسبقًا
             exists = conn.execute(
-                        text("SELECT 1 FROM equipment WHERE name = :name"),
-                        {"name": name},
-                    ).scalar_one_or_none()
+                text("SELECT 1 FROM equipment WHERE name = :name"),
+                {"name": name},
+            ).scalar_one_or_none()
 
             if exists is None:
-           
+                # جهاز غير معروف -> ما نخزن
                 return False
+
             # Insert reading
             reading_id = conn.execute(
                 text("""
@@ -345,22 +372,23 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
                 },
             ).scalar_one()
 
-            # Insert prediction
+            # Insert prediction (مع sensor_error)
             conn.execute(
                 text("""
-                    INSERT INTO prediction (reading_id, prediction, probability, timestamp, message)
-                    VALUES (:reading_id, :prediction, :probability, :timestamp, :message)
+                    INSERT INTO prediction (reading_id, prediction, probability, timestamp, message, sensor_error)
+                    VALUES (:reading_id, :prediction, :probability, :timestamp, :message, :sensor_error)
                 """),
                 {
                     "reading_id": reading_id,
                     "prediction": failurety,
-                    "probability": risk_score / 100.0,
+                    "probability": probability,
                     "timestamp": ts_db,
                     "message": message,
+                    "sensor_error": sensor_error,
                 },
             )
 
-        # Emit socket event
+        # Emit socket event للداشبورد
         payload = {
             "date": ts.strftime("%H:%M:%S"),
             "equipment_name": name,
@@ -368,17 +396,19 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
             "vibration": float(vibration),
             "pressure": float(pressure),
             "humidity": float(humidity),
-            "risk_score": int(risk_score),
+            "risk_score": int(risk_score) if (risk_score is not None) else 0,
+            "sensor_error": sensor_error,
         }
         if message:
             payload["message"] = message
         socketio.emit("reading_update", payload)
 
-        return True   # SUCCESS
+        return True
 
     except Exception as e:
         print("DB error:", e)
-        return False  # FAILURE
+        return False
+
 
 
 # ===================================================
@@ -672,17 +702,27 @@ def latest():
         if row is None:
             return jsonify({"ok": True, "data": None})
 
+        sensor_error = bool(row["sensor_error"])
+
+        if sensor_error:
+            risk_score = 0
+            prediction = None
+        else:
+            risk_score = round(float(row["probability"]) * 100)
+            prediction = int(row["prediction"])
+
         data = {
             "temperature": float(row["temperature"]),
             "vibration": float(row["vibration"]),
             "pressure": float(row["pressure"]),
             "humidity": float(row["humidity"]),
             "timestamp": row["timestamp"].isoformat(),
-            "risk_score": round(float(row["probability"]) * 100),
-            "prediction": int(row["prediction"]),
+            "risk_score": risk_score,
+            "prediction": prediction,
             "message": row["message"],
-            "sensor_error": bool(row["sensor_error"]),
+            "sensor_error": sensor_error,
         }
+
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -736,16 +776,25 @@ def records():
 
         data = []
         for row in rows:
+            sensor_error = bool(row["sensor_error"])
+
+            if sensor_error:
+                pred = None
+                prob = None
+            else:
+                pred = int(row["prediction"])
+                prob = float(row["probability"])
+
             data.append({
                 "temperature": float(row["temperature"]),
                 "vibration": float(row["vibration"]),
                 "pressure": float(row["pressure"]),
                 "humidity": float(row["humidity"]),
                 "timestamp": row["timestamp"].isoformat(),
-                "prediction": int(row["prediction"]),
-                "probability": float(row["probability"]),
+                "prediction": pred,
+                "probability": prob,
                 "message": row["message"],
-                "sensor_error": bool(row["sensor_error"]),
+                "sensor_error": sensor_error,
             })
 
         return jsonify({"ok": True, "data": data}), 200
