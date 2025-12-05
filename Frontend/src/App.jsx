@@ -169,49 +169,47 @@ function App() {
 
     // ======== Alerts UI ========
     function renderAlerts() {
-      alertsList.innerHTML = "";
-      const alerts = Array.from(alertsMap.values());
-      if (!alerts.length) {
-        const p = document.createElement("p");
-        p.className = "alert-empty";
-        p.textContent = "No active alerts.";
-        alertsList.appendChild(p);
-        return;
-      }
+  alertsList.innerHTML = "";
+  const alerts = Array.from(alertsMap.values());
+  if (!alerts.length) {
+    const p = document.createElement("p");
+    p.className = "alert-empty";
+    p.textContent = "No active alerts.";
+    alertsList.appendChild(p);
+    return;
+  }
 
-      alerts
-        .sort((a, b) => b._ts - a._ts)
-        .forEach((a) => {
-          const div = document.createElement("div");
-      
-          // لو سينسر إيرور نضيف كلاس sensor-error
-          div.className = "alert-item" + (a.sensor_error ? " sensor-error" : "");
-      
-          div.innerHTML = `
-            <div class="alert-header">
-              <span class="alert-pill">
-                ${a.sensor_error ? "SENSOR" : "WARNING"}
-              </span>
-            </div>
-            <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
-            <span class="time">${a.time}</span>
-          `;
-      
-          alertsList.appendChild(div);
-        });
+  alerts
+    .sort((a, b) => b._ts - a._ts)
+    .forEach((a) => {
+      const div = document.createElement("div");
+      div.className = "alert-item" + (a.sensor_error ? " sensor-error" : "");
 
-    }
+      div.innerHTML = `
+        <div class="alert-header">
+          <span class="alert-pill">
+            ${a.sensor_error ? "SENSOR" : "WARNING"}
+          </span>
+        </div>
+        <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
+        <span class="time">${a.time}</span>
+      `;
+      alertsList.appendChild(div);
+    });
+}
 
-    function upsertAlert(name, timeStr, message, type = "failure") {
-      alertsMap.set(name + ":" + type, {
-        name,
-        time: timeStr,
-        message,
-        type,
-        _ts: Date.now(),
-      });
-      renderAlerts();
-    }
+
+    function upsertAlert(name, timeStr, message, sensorError = false) {
+  alertsMap.set(name, {
+    name,
+    time: timeStr,
+    message,
+    sensor_error: sensorError,   // نخزن نوع التنبيه هنا
+    _ts: Date.now(),
+  });
+  renderAlerts();
+}
+
 
     function clearAlert(name) {
       // نحذف كل أنواع التنبيهات المرتبطة بهذا الجهاز
@@ -271,12 +269,29 @@ function App() {
         return;
       }
 
-      // 🔴 Failure عادي
-      if (risk >= RISK_THRESHOLD || prediction === 1) {
-        upsertAlert(name, timeStr, data.message, "failure");
-      } else {
-        clearAlert(name);
-      }
+      const sensorError = !!data.sensor_error;
+
+if (sensorError) {
+  // Sensor fault alert
+  upsertAlert(
+    name,
+    timeStr,
+    data.message || "Sensor Error: abnormal readings detected.",
+    true
+  );
+} else if (risk >= RISK_THRESHOLD || prediction === 1) {
+  // Failure / high-risk alert عادي
+  upsertAlert(
+    name,
+    timeStr,
+    data.message || "High failure risk detected on this equipment.",
+    false
+  );
+} else {
+  // لا Sensor Fault ولا Failure → نشيل أي Alert موجود
+  clearAlert(name);
+}
+
 
       await fetchRecordsForSelected();
     }
@@ -301,18 +316,26 @@ function App() {
             })
           : fmt.clock();
 
-        if (data.sensor_error) {
+        const sensorError = !!data.sensor_error;
+
+        if (sensorError) {
           upsertAlert(
             name,
             timeStr,
-            data.message || "Sensor error detected. Please inspect the sensor.",
-            "sensor"
+            data.message || "Sensor Error: abnormal readings detected.",
+            true
           );
         } else if (risk >= RISK_THRESHOLD || prediction === 1) {
-          upsertAlert(name, timeStr, data.message, "failure");
+          upsertAlert(
+            name,
+            timeStr,
+            data.message || "High failure risk detected on this equipment.",
+            false
+          );
         } else {
           clearAlert(name);
         }
+
       }
     }
 
