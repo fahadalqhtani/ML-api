@@ -362,3 +362,17 @@ select {
 .row-sensor {
   background-color: #fff9c4; /* أصفر فاتح يوضح أنه Sensor Fault */
 }
+/* Sensor Error (أصفر) */
+.alert-item.sensor-error {
+  background: #fef3c7; /* أصفر فاتح */
+  border-left: 4px solid #f59e0b;
+}
+
+.alert-item.sensor-error .alert-pill {
+  background: #f59e0b !important; /* برتقالي */
+}
+
+/* Warning (أحمر) – يبقى كما هو */
+.alert-item .alert-pill {
+  background: #dc2626; /* الأحمر القديم */
+}
