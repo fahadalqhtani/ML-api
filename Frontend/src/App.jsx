@@ -212,13 +212,8 @@ function App() {
 
 
     function clearAlert(name) {
-      // نحذف كل أنواع التنبيهات المرتبطة بهذا الجهاز
-      for (const key of Array.from(alertsMap.keys())) {
-        if (key.startsWith(name + ":")) {
-          alertsMap.delete(key);
-        }
-      }
-      renderAlerts();
+      alertsMap.delete(name);   // احذف تنبيه الجهاز مباشرة
+       renderAlerts();
     }
 
     // ======== API helpers ========
