@@ -34,7 +34,6 @@ function App() {
     let simRunning = false;
     let pollTimer = null;
 
-    
     let allRecords = [];
 
     // ======== Records table ========
@@ -71,16 +70,39 @@ function App() {
             hour12: true,
           });
 
+          // class للصف حسب نوع الحالة
+          const rowClass = r.sensor_error
+            ? "row-sensor" // أصفر: Sensor Fault
+            : Number(r.prediction) === 1
+            ? "row-fail"   // أحمر: Equipment Failure
+            : "";
+
+          const predictionText = r.sensor_error
+            ? "Sensor Fault"
+            : Number(r.prediction) === 1
+            ? "Failure"
+            : "Normal";
+
+          const riskText = r.sensor_error
+            ? "--"
+            : `${(Number(r.probability) * 100).toFixed(0)}%`;
+
+          const messageText = r.sensor_error
+            ? `Sensor Error: ${
+                r.message || "Abnormal sensor reading detected."
+              }`
+            : r.message ?? "";
+
           return `
-          <tr class="${Number(r.prediction) === 1 ? "row-fail" : ""}">
+          <tr class="${rowClass}">
             <td>${timeStr}</td>
             <td>${Number(r.temperature).toFixed(1)}</td>
             <td>${Number(r.vibration).toFixed(2)}</td>
             <td>${Number(r.pressure).toFixed(0)}</td>
             <td>${Number(r.humidity).toFixed(1)}</td>
-            <td>${Number(r.prediction) === 1 ? "Failure" : "Normal"}</td>
-            <td>${(Number(r.probability) * 100).toFixed(0)}%</td>
-            <td>${r.message ?? ""}</td>
+            <td>${predictionText}</td>
+            <td>${riskText}</td>
+            <td>${messageText}</td>
           </tr>`;
         })
         .join("");
@@ -94,21 +116,25 @@ function App() {
         </div>`;
     }
 
-    
     function applyRecordsFilterAndRender() {
       if (!allRecords || !allRecords.length) {
         renderRecordsTable([]);
         return;
       }
 
-      const mode = (filterSel?.value || "all");
+      const mode = filterSel?.value || "all";
 
       let rows = allRecords;
       if (mode === "failure") {
-        rows = allRecords.filter((r) => Number(r.prediction) === 1);
+        rows = allRecords.filter(
+          (r) => !r.sensor_error && Number(r.prediction) === 1
+        );
       } else if (mode === "normal") {
-        rows = allRecords.filter((r) => Number(r.prediction) === 0);
+        rows = allRecords.filter(
+          (r) => !r.sensor_error && Number(r.prediction) === 0
+        );
       }
+      // لو حاب تضيف فلتر للسنسور ايرور مستقبلًا تقدر تضيف خيار ثالث
 
       renderRecordsTable(rows);
     }
@@ -122,7 +148,6 @@ function App() {
       }
 
       try {
-        
         const res = await fetch(
           `${API_BASE}/records?equipment_name=${encodeURIComponent(name)}`
         );
@@ -161,7 +186,7 @@ function App() {
           div.className = "alert-item";
           div.innerHTML = `
           <div class="alert-header">
-            <span class="alert-pill">WARNING</span>
+            <span class="alert-pill">${a.type === "sensor" ? "SENSOR" : "WARNING"}</span>
           </div>
           <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
           <span class="time">${a.time}</span>
@@ -170,13 +195,25 @@ function App() {
         });
     }
 
-    function upsertAlert(name, timeStr, message) {
-      alertsMap.set(name, { name, time: timeStr, message, _ts: Date.now() });
+    function upsertAlert(name, timeStr, message, type = "failure") {
+      alertsMap.set(name + ":" + type, {
+        name,
+        time: timeStr,
+        message,
+        type,
+        _ts: Date.now(),
+      });
       renderAlerts();
     }
 
     function clearAlert(name) {
-      if (alertsMap.delete(name)) renderAlerts();
+      // نحذف كل أنواع التنبيهات المرتبطة بهذا الجهاز
+      for (const key of Array.from(alertsMap.keys())) {
+        if (key.startsWith(name + ":")) {
+          alertsMap.delete(key);
+        }
+      }
+      renderAlerts();
     }
 
     // ======== API helpers ========
@@ -210,13 +247,26 @@ function App() {
 
       const risk = Number(data.risk_score || 0);
       const prediction = Number(data.prediction || 0);
-      const timeStr = new Date(data.timestamp || Date.now()).toLocaleTimeString(
-        "en-US",
-        { hour12: true }
-      );
+      const timeStr = new Date(
+        data.timestamp || Date.now()
+      ).toLocaleTimeString("en-US", { hour12: true });
 
+      // 🔶 حالة Sensor Error
+      if (data.sensor_error) {
+        upsertAlert(
+          name,
+          timeStr,
+          data.message || "Sensor error detected. Please inspect the sensor.",
+          "sensor"
+        );
+        // ما نتعامل معها كـ Failure للمعدة
+        await fetchRecordsForSelected();
+        return;
+      }
+
+      // 🔴 Failure عادي
       if (risk >= RISK_THRESHOLD || prediction === 1) {
-        upsertAlert(name, timeStr, data.message);
+        upsertAlert(name, timeStr, data.message, "failure");
       } else {
         clearAlert(name);
       }
@@ -243,8 +293,16 @@ function App() {
               hour12: true,
             })
           : fmt.clock();
-        if (risk >= RISK_THRESHOLD || prediction === 1) {
-          upsertAlert(name, timeStr, data.message);
+
+        if (data.sensor_error) {
+          upsertAlert(
+            name,
+            timeStr,
+            data.message || "Sensor error detected. Please inspect the sensor.",
+            "sensor"
+          );
+        } else if (risk >= RISK_THRESHOLD || prediction === 1) {
+          upsertAlert(name, timeStr, data.message, "failure");
         } else {
           clearAlert(name);
         }
@@ -354,7 +412,6 @@ function App() {
       startPolling();
     })();
 
-    
     return () => {
       if (pollTimer) clearInterval(pollTimer);
     };
