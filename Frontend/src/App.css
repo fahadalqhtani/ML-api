@@ -359,3 +359,6 @@ select {
   font-size: .9rem;
   cursor: pointer;
 }
+.row-sensor {
+  background-color: #fff9c4; /* أصفر فاتح يوضح أنه Sensor Fault */
+}
