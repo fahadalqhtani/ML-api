@@ -503,10 +503,17 @@ def ingest():
 
     risk_score = compute_risk_score(temperature, vibration, pressure, humidity, code)
     saved=upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidity, risk_score)
+    
+    if not saved:
+        return jsonify({
+            "ok": False,
+            "db_stored": False,
+            "error": "Failed to store reading in the database. The equipment may be unknown or a database error occurred."
+        }), 400 
 
     return jsonify({
         "ok": True,
-        "db_stored":saved,
+        "db_stored":True,
         "data": {
             "date": ts.strftime("%Y/%m/%d %H:%M:%S"),
             "equipment_name": name,
@@ -568,7 +575,7 @@ def latest():
 def records():
     """Return readings + prediction info for a specific equipment."""
     name = request.args.get("equipment_name", "").strip()
-    limit_str = request.args.get("limit")  # 👈 بدون قيمة افتراضية
+    limit_str = request.args.get("limit")  
 
     if not name:
         return jsonify({"ok": False, "error": "equipment_name is required"}), 400
