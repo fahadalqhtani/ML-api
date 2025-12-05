@@ -183,16 +183,23 @@ function App() {
         .sort((a, b) => b._ts - a._ts)
         .forEach((a) => {
           const div = document.createElement("div");
-          div.className = "alert-item";
+      
+          // لو سينسر إيرور نضيف كلاس sensor-error
+          div.className = "alert-item" + (a.sensor_error ? " sensor-error" : "");
+      
           div.innerHTML = `
-          <div class="alert-header">
-            <span class="alert-pill">${a.type === "sensor" ? "SENSOR" : "WARNING"}</span>
-          </div>
-          <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
-          <span class="time">${a.time}</span>
-        `;
+            <div class="alert-header">
+              <span class="alert-pill">
+                ${a.sensor_error ? "SENSOR" : "WARNING"}
+              </span>
+            </div>
+            <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
+            <span class="time">${a.time}</span>
+          `;
+      
           alertsList.appendChild(div);
         });
+
     }
 
     function upsertAlert(name, timeStr, message, type = "failure") {
