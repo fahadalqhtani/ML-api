@@ -250,7 +250,7 @@ def upsert_and_insert_reading(name, ts, temperature, vibration, pressure, humidi
                 message = build_warning_message_multi(name, causes, cur_vals)
 
         with engine.begin() as conn:
-             exists = conn.execute(
+            exists = conn.execute(
                         text("SELECT 1 FROM equipment WHERE name = :name"),
                         {"name": name},
                     ).scalar_one_or_none()
