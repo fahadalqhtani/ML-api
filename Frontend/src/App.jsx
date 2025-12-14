@@ -417,14 +417,10 @@ function App() {
           marginBottom: "1rem",
         }}
       >
-        <button
-          id="simBtn"
-          type="button"
-          onClick={logout}
-          style={{ background: "#111827" }}
-        >
+        <button id="logoutBtn" type="button" onClick={logout} style={{ background: "#111827" }}>
           Logout
         </button>
+
       </div>
 
       <div className="wrap">
