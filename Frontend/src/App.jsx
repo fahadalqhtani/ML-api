@@ -437,6 +437,10 @@ function App() {
             <button id="simBtn" type="button">
               Start Simulation
             </button>
+
+            <button className="logout-btn" type="button" onClick={logout}>
+              Logout
+            </button>
           </div>
 
           <div className="metrics">
