@@ -15,6 +15,10 @@ from flask_socketio import SocketIO
 from sqlalchemy import create_engine, text
 from joblib import load as joblib_load
 
+import re
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+
 # ===================================================
 # Configuration
 # ===================================================
@@ -61,6 +65,9 @@ if not Path(MODEL_PATH).exists():
     raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
 model = joblib_load(MODEL_PATH)
 
+
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "change-me-now")
+jwt = JWTManager(app)
 # ===================================================
 # SHAP Initialization
 # ===================================================
@@ -802,7 +809,63 @@ def records():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-   
+@app.route("/auth/register", methods=["POST"])
+def register():
+    data = request.get_json() or {}
+    national_id = (data.get("national_id") or "").strip()
+    password = data.get("password") or ""
+
+    if not re.fullmatch(r"\d{10}", national_id):
+        return jsonify({"error": "National ID must be exactly 10 digits"}), 400
+
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+
+    password_hash = generate_password_hash(password)
+
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO users (national_id, password_hash) VALUES (%s, %s)",
+            (national_id, password_hash)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"message": "User registered successfully"}), 201
+    except Exception:
+        return jsonify({"error": "National ID already exists"}), 409
+
+
+@app.route("/auth/login", methods=["POST"])
+def login():
+    data = request.get_json() or {}
+    national_id = (data.get("national_id") or "").strip()
+    password = data.get("password") or ""
+
+    if not re.fullmatch(r"\d{10}", national_id):
+        return jsonify({"error": "Invalid national ID"}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, password_hash FROM users WHERE national_id = %s",
+        (national_id,)
+    )
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not user:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    user_id, password_hash = user
+    if not check_password_hash(password_hash, password):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    token = create_access_token(identity=user_id)
+    return jsonify({"access_token": token}), 200   
       
 
 # ===================================================
