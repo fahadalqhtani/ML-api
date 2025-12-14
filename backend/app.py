@@ -862,6 +862,11 @@ def login():
     token = create_access_token(identity=user_id)
     return jsonify({"access_token": token}), 200
   
+@app.get("/auth/me")
+@jwt_required()
+def auth_me():
+    user_id = get_jwt_identity()
+    return jsonify({"ok": True, "user_id": user_id}), 200
       
 
 # ===================================================
