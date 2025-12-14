@@ -824,18 +824,16 @@ def register():
     password_hash = generate_password_hash(password)
 
     try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO users (national_id, password_hash) VALUES (%s, %s)",
-            (national_id, password_hash)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO users (national_id, password_hash) VALUES (:nid, :ph)"),
+                {"nid": national_id, "ph": password_hash},
+            )
         return jsonify({"message": "User registered successfully"}), 201
+
     except Exception:
         return jsonify({"error": "National ID already exists"}), 409
+
 
 
 @app.route("/auth/login", methods=["POST"])
@@ -847,25 +845,23 @@ def login():
     if not re.fullmatch(r"\d{10}", national_id):
         return jsonify({"error": "Invalid national ID"}), 400
 
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, password_hash FROM users WHERE national_id = %s",
-        (national_id,)
-    )
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id, password_hash FROM users WHERE national_id = :nid"),
+            {"nid": national_id},
+        ).fetchone()
 
-    if not user:
+    if not row:
         return jsonify({"error": "Invalid credentials"}), 401
 
-    user_id, password_hash = user
+    user_id, password_hash = row[0], row[1]
+
     if not check_password_hash(password_hash, password):
         return jsonify({"error": "Invalid credentials"}), 401
 
     token = create_access_token(identity=user_id)
-    return jsonify({"access_token": token}), 200   
+    return jsonify({"access_token": token}), 200
+  
       
 
 # ===================================================
