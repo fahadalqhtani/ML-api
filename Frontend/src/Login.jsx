@@ -46,71 +46,37 @@ export default function Login({ onLoggedIn }) {
   };
 
   return (
-    <div style={{ maxWidth: 420, margin: "70px auto", padding: 24 }}>
-      <h2 style={{ marginBottom: 8 }}>System Login</h2>
-      <p style={{ marginTop: 0, marginBottom: 16, opacity: 0.8 }}>
-        Sign in to access the Equipment Monitoring Dashboard.
-      </p>
-
-      {err && (
-        <div
-          style={{
-            background: "#ffe5e5",
-            padding: 12,
-            borderRadius: 10,
-            marginBottom: 12,
-            border: "1px solid #ffb3b3",
-          }}
-        >
-          {err}
-        </div>
-      )}
-
+    <div className="login-card">
+      <h2 className="login-title">System Login</h2>
+      <p className="login-sub">Sign in to access the Equipment Monitoring Dashboard.</p>
+  
+      {err && <div className="login-error">{err}</div>}
+  
       <form onSubmit={submit}>
-        <label style={{ display: "block", marginBottom: 6 }}>National ID</label>
+        <label className="login-label">National ID</label>
         <input
+          className="login-input"
           placeholder="e.g., 1234567890"
           value={nationalId}
           onChange={(e) => setNationalId(e.target.value)}
           maxLength={10}
           inputMode="numeric"
-          style={{
-            width: "100%",
-            padding: 10,
-            marginBottom: 12,
-            borderRadius: 10,
-            border: "1px solid #ddd",
-          }}
         />
-
-        <label style={{ display: "block", marginBottom: 6 }}>Password</label>
+  
+        <label className="login-label">Password</label>
         <input
+          className="login-input"
           type="password"
           placeholder="Enter your password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          style={{
-            width: "100%",
-            padding: 10,
-            marginBottom: 12,
-            borderRadius: 10,
-            border: "1px solid #ddd",
-          }}
         />
-
-        <button
-          disabled={loading}
-          style={{
-            width: "100%",
-            padding: 10,
-            borderRadius: 10,
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
+  
+        <button className="login-btn" disabled={loading}>
           {loading ? "Signing in..." : "Sign In"}
         </button>
       </form>
     </div>
   );
+
 }
