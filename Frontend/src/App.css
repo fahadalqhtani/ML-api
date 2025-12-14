@@ -437,3 +437,23 @@ select {
   opacity: .6;
   cursor: default;
 }
+.logout-btn {
+  padding: .55em 1.1em;
+  border-radius: .7em;
+  border: 1px solid var(--ring);
+  background: #fff;
+  color: var(--muted);
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.logout-btn:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.logout-btn:active {
+  transform: translateY(1px);
+}
