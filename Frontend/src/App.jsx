@@ -1,19 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import "./App.css";
-import Login from "./Login";
 
 function App() {
-  const [authed, setAuthed] = useState(!!sessionStorage.getItem("token"));
-
-  const logout = () => {
-    sessionStorage.removeItem("token");
-    setAuthed(false);
-  };
-
   useEffect(() => {
-    if (!authed) return;
-
-    const API_BASE = "https://ml-api-ec2k.onrender.com";
+    // ======== CONFIG ========
+    const API_BASE = "https://ml-api-ec2k.onrender.com"; // عدّلها لو عندك URL مختلف
     const RISK_THRESHOLD = 85;
 
     const sel = document.getElementById("deviceSelect");
@@ -34,7 +25,8 @@ function App() {
       vib: (v) => `${Number(v).toFixed(2)} units`,
       pres: (v) => `${Number(v).toFixed(0)} psi`,
       hum: (v) => `${Number(v).toFixed(1)} %`,
-      clock: () => new Date().toLocaleTimeString("en-US", { hour12: true }),
+      clock: () =>
+        new Date().toLocaleTimeString("en-US", { hour12: true }),
     };
 
     let devices = [];
@@ -44,6 +36,7 @@ function App() {
 
     let allRecords = [];
 
+    // ======== Records table ========
     function renderRecordsTable(rows) {
       if (!rows || !rows.length) {
         recordsContent.innerHTML =
@@ -77,10 +70,11 @@ function App() {
             hour12: true,
           });
 
+          // class للصف حسب نوع الحالة
           const rowClass = r.sensor_error
-            ? "row-sensor"
+            ? "row-sensor" // أصفر: Sensor Fault
             : Number(r.prediction) === 1
-            ? "row-fail"
+            ? "row-fail"   // أحمر: Equipment Failure
             : "";
 
           const predictionText = r.sensor_error
@@ -94,7 +88,9 @@ function App() {
             : `${(Number(r.probability) * 100).toFixed(0)}%`;
 
           const messageText = r.sensor_error
-            ? `Sensor Error: ${r.message || "Abnormal sensor reading detected."}`
+            ? `Sensor Error: ${
+                r.message || "Abnormal sensor reading detected."
+              }`
             : r.message ?? "";
 
           return `
@@ -138,6 +134,7 @@ function App() {
           (r) => !r.sensor_error && Number(r.prediction) === 0
         );
       }
+      // لو حاب تضيف فلتر للسنسور ايرور مستقبلًا تقدر تضيف خيار ثالث
 
       renderRecordsTable(rows);
     }
@@ -170,51 +167,56 @@ function App() {
       }
     }
 
+    // ======== Alerts UI ========
     function renderAlerts() {
-      alertsList.innerHTML = "";
-      const alerts = Array.from(alertsMap.values());
+  alertsList.innerHTML = "";
+  const alerts = Array.from(alertsMap.values());
+  if (!alerts.length) {
+    const p = document.createElement("p");
+    p.className = "alert-empty";
+    p.textContent = "No active alerts.";
+    alertsList.appendChild(p);
+    return;
+  }
 
-      if (!alerts.length) {
-        const p = document.createElement("p");
-        p.className = "alert-empty";
-        p.textContent = "No active alerts.";
-        alertsList.appendChild(p);
-        return;
-      }
+  alerts
+    .sort((a, b) => b._ts - a._ts)
+    .forEach((a) => {
+      const div = document.createElement("div");
+      div.className = "alert-item" + (a.sensor_error ? " sensor-error" : "");
 
-      alerts
-        .sort((a, b) => b._ts - a._ts)
-        .forEach((a) => {
-          const div = document.createElement("div");
-          div.className = "alert-item" + (a.sensor_error ? " sensor-error" : "");
+      div.innerHTML = `
+        <div class="alert-header">
+          <span class="alert-pill">
+            ${a.sensor_error ? "SENSOR" : "WARNING"}
+          </span>
+        </div>
+        <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
+        <span class="time">${a.time}</span>
+      `;
+      alertsList.appendChild(div);
+    });
+}
 
-          div.innerHTML = `
-            <div class="alert-header">
-              <span class="alert-pill">${a.sensor_error ? "SENSOR" : "WARNING"}</span>
-            </div>
-            <p class="alert-msg">${a.message || "Abnormal condition detected."}</p>
-            <span class="time">${a.time}</span>
-          `;
-          alertsList.appendChild(div);
-        });
-    }
 
     function upsertAlert(name, timeStr, message, sensorError = false) {
-      alertsMap.set(name, {
-        name,
-        time: timeStr,
-        message,
-        sensor_error: sensorError,
-        _ts: Date.now(),
-      });
-      renderAlerts();
-    }
+  alertsMap.set(name, {
+    name,
+    time: timeStr,
+    message,
+    sensor_error: sensorError,   // نخزن نوع التنبيه هنا
+    _ts: Date.now(),
+  });
+  renderAlerts();
+}
+
 
     function clearAlert(name) {
-      alertsMap.delete(name);
-      renderAlerts();
+      alertsMap.delete(name);   // احذف تنبيه الجهاز مباشرة
+       renderAlerts();
     }
 
+    // ======== API helpers ========
     async function fetchLatest(name) {
       try {
         const res = await fetch(
@@ -230,9 +232,10 @@ function App() {
       }
     }
 
-    async function updateSelectedCards() {
+    async function updateSelectedCards(source = "poll") {
       const name = (sel.value || "").trim();
-      if (!name || name.startsWith("Loading") || name.startsWith("Could not")) return;
+      if (!name || name.startsWith("Loading") || name.startsWith("Could not"))
+        return;
 
       const data = await fetchLatest(name);
       if (!data) return;
@@ -244,34 +247,51 @@ function App() {
 
       const risk = Number(data.risk_score || 0);
       const prediction = Number(data.prediction || 0);
-      const timeStr = new Date(data.timestamp || Date.now()).toLocaleTimeString(
-        "en-US",
-        { hour12: true }
-      );
+      const timeStr = new Date(
+        data.timestamp || Date.now()
+      ).toLocaleTimeString("en-US", { hour12: true });
+
+      // 🔶 حالة Sensor Error
+      if (data.sensor_error) {
+        upsertAlert(
+          name,
+          timeStr,
+          data.message || "Sensor error detected. Please inspect the sensor.",
+          "sensor"
+        );
+        // ما نتعامل معها كـ Failure للمعدة
+        await fetchRecordsForSelected();
+        return;
+      }
 
       const sensorError = !!data.sensor_error;
 
-      if (sensorError) {
-        upsertAlert(
-          name,
-          timeStr,
-          data.message || "Sensor Error: abnormal readings detected.",
-          true
-        );
-      } else if (risk >= RISK_THRESHOLD || prediction === 1) {
-        upsertAlert(
-          name,
-          timeStr,
-          data.message || "High failure risk detected on this equipment.",
-          false
-        );
-      } else {
-        clearAlert(name);
-      }
+if (sensorError) {
+  // Sensor fault alert
+  upsertAlert(
+    name,
+    timeStr,
+    data.message || "Sensor Error: abnormal readings detected.",
+    true
+  );
+} else if (risk >= RISK_THRESHOLD || prediction === 1) {
+  // Failure / high-risk alert عادي
+  upsertAlert(
+    name,
+    timeStr,
+    data.message || "High failure risk detected on this equipment.",
+    false
+  );
+} else {
+  // لا Sensor Fault ولا Failure → نشيل أي Alert موجود
+  clearAlert(name);
+}
+
 
       await fetchRecordsForSelected();
     }
 
+    // ======== Refresh alerts for all devices ========
     async function refreshAlertsForAllDevices() {
       const selected = (sel.value || "").trim();
 
@@ -283,11 +303,12 @@ function App() {
           clearAlert(name);
           continue;
         }
-
         const risk = Number(data.risk_score || 0);
         const prediction = Number(data.prediction || 0);
         const timeStr = data.timestamp
-          ? new Date(data.timestamp).toLocaleTimeString("en-US", { hour12: true })
+          ? new Date(data.timestamp).toLocaleTimeString("en-US", {
+              hour12: true,
+            })
           : fmt.clock();
 
         const sensorError = !!data.sensor_error;
@@ -309,41 +330,55 @@ function App() {
         } else {
           clearAlert(name);
         }
+
       }
     }
 
+    // ======== Polling ========
     function startPolling() {
       if (pollTimer) return;
       pollTimer = setInterval(async () => {
-        await updateSelectedCards();
-        await refreshAlertsForAllDevices();
+        await updateSelectedCards("poll"); // يحدّث الجهاز المختار
+        await refreshAlertsForAllDevices(); // يحدّث باقي الأجهزة فقط
       }, 5000);
     }
 
-    const handleSimClick = async () => {
-      const action = simRunning ? "stop" : "start";
-      simBtn.disabled = true;
+    // ======== Simulation button ========
+    if (simBtn) {
+      simBtn.addEventListener("click", async () => {
+        const action = simRunning ? "stop" : "start";
+        simBtn.disabled = true;
 
-      try {
-        const res = await fetch(`${API_BASE}/simulation/${action}`, { method: "POST" });
-        const json = await res.json().catch(() => ({}));
+        try {
+          const res = await fetch(`${API_BASE}/simulation/${action}`, {
+            method: "POST",
+          });
+          const json = await res.json().catch(() => ({}));
 
-        if (!res.ok || json.ok === false) {
-          alert("Simulation request failed.\nCheck /simulation logs on Render.");
-          return;
+          if (!res.ok || json.ok === false) {
+            alert(
+              "Simulation request failed.\nCheck /simulation logs on Render."
+            );
+            return;
+          }
+
+          simRunning = !simRunning;
+          simBtn.textContent = simRunning
+            ? "Stop Simulation"
+            : "Start Simulation";
+          simBtn.style.background = simRunning ? "#dc2626" : "#2563eb";
+        } catch (err) {
+          console.error("Simulation toggle error:", err);
+          alert(
+            "Could not reach the API server.\nIs your Render service running?"
+          );
+        } finally {
+          simBtn.disabled = false;
         }
+      });
+    }
 
-        simRunning = !simRunning;
-        simBtn.textContent = simRunning ? "Stop Simulation" : "Start Simulation";
-        simBtn.style.background = simRunning ? "#dc2626" : "#2563eb";
-      } catch (err) {
-        console.error("Simulation toggle error:", err);
-        alert("Could not reach the API server.\nIs your Render service running?");
-      } finally {
-        simBtn.disabled = false;
-      }
-    };
-
+    // ======== Load devices ========
     async function loadDevices() {
       const setOpt = (txt) =>
         (sel.innerHTML = `<option disabled selected>${txt}</option>`);
@@ -360,11 +395,13 @@ function App() {
           sel.innerHTML = devices
             .map(
               (name, idx) =>
-                `<option value="${name}" ${idx === 0 ? "selected" : ""}>${name}</option>`
+                `<option value="${name}" ${
+                  idx === 0 ? "selected" : ""
+                }>${name}</option>`
             )
             .join("");
 
-          await updateSelectedCards();
+          await updateSelectedCards("initial");
           await refreshAlertsForAllDevices();
           return;
         } catch (e) {
@@ -377,19 +414,24 @@ function App() {
       setOpt("Could not load devices (server waking up)…");
     }
 
-    const onDeviceChange = async () => {
-      els.temp.textContent = els.vib.textContent = els.pres.textContent = els.hum.textContent = "--";
-      await updateSelectedCards();
-    };
+    if (sel) {
+      sel.addEventListener("change", async () => {
+        els.temp.textContent =
+          els.vib.textContent =
+          els.pres.textContent =
+          els.hum.textContent =
+          "--";
+        await updateSelectedCards("select-change");
+      });
+    }
 
-    const onFilterChange = () => {
-      applyRecordsFilterAndRender();
-    };
+    if (filterSel) {
+      filterSel.addEventListener("change", () => {
+        applyRecordsFilterAndRender();
+      });
+    }
 
-    if (simBtn) simBtn.addEventListener("click", handleSimClick);
-    if (sel) sel.addEventListener("change", onDeviceChange);
-    if (filterSel) filterSel.addEventListener("change", onFilterChange);
-
+    // === init ===
     (async () => {
       await loadDevices();
       startPolling();
@@ -397,33 +439,13 @@ function App() {
 
     return () => {
       if (pollTimer) clearInterval(pollTimer);
-      if (simBtn) simBtn.removeEventListener("click", handleSimClick);
-      if (sel) sel.removeEventListener("change", onDeviceChange);
-      if (filterSel) filterSel.removeEventListener("change", onFilterChange);
     };
-  }, [authed]);
-
-  if (!authed) {
-    return <Login onLoggedIn={() => setAuthed(true)} />;
-  }
+  }, []);
 
   return (
     <>
-      <div
-        style={{
-          width: "95vw",
-          display: "flex",
-          justifyContent: "flex-end",
-          marginBottom: "1rem",
-        }}
-      >
-        <button id="logoutBtn" type="button" onClick={logout} style={{ background: "#111827" }}>
-          Logout
-        </button>
-
-      </div>
-
       <div className="wrap">
+        {/* Left panel */}
         <section className="panel" aria-label="Monitoring">
           <div className="header">
             <div className="title-group">
@@ -436,10 +458,6 @@ function App() {
             </div>
             <button id="simBtn" type="button">
               Start Simulation
-            </button>
-
-            <button className="logout-btn" type="button" onClick={logout}>
-              Logout
             </button>
           </div>
 
@@ -471,18 +489,25 @@ function App() {
           </div>
         </section>
 
+        {/* Right panel */}
         <aside className="alerts" aria-label="Active alerts">
           <h2>Active Alerts</h2>
           <div id="alertsList"></div>
         </aside>
       </div>
 
-      <section id="recordsPanel" className="records" aria-label="Recorded readings">
+      {/* Records panel */}
+      <section
+        id="recordsPanel"
+        className="records"
+        aria-label="Recorded readings"
+      >
         <div className="records-header">
           <div>
             <h3>Recorded Readings &amp; Failures</h3>
             <p className="records-sub">
-              Shows all records for the selected equipment (from Postgres / prediction table).
+              Shows all records for the selected equipment (from Postgres /
+              prediction table).
             </p>
           </div>
 
