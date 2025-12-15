@@ -200,21 +200,34 @@ function App() {
 
 
     function upsertAlert(name, timeStr, message, sensorError = false) {
+  const prev = alertsMap.get(name);
+
+  // إذا نفس الرسالة + نفس النوع (Sensor/Warning) => لا تحدث ولا تعيد الرندر
+  if (
+    prev &&
+    (prev.message || "") === (message || "") &&
+    !!prev.sensor_error === !!sensorError
+  ) {
+    return;
+  }
+
   alertsMap.set(name, {
     name,
     time: timeStr,
     message,
-    sensor_error: sensorError,   // نخزن نوع التنبيه هنا
-    _ts: Date.now(),
+    sensor_error: !!sensorError,
+    _ts: Date.now(), // فقط إذا تغير فعلاً
   });
+
   renderAlerts();
 }
 
 
     function clearAlert(name) {
-      alertsMap.delete(name);   // احذف تنبيه الجهاز مباشرة
-       renderAlerts();
-    }
+  if (!alertsMap.has(name)) return; // ما فيه شيء ينحذف
+  alertsMap.delete(name);
+  renderAlerts();
+}
 
     // ======== API helpers ========
     async function fetchLatest(name) {
@@ -254,11 +267,12 @@ function App() {
       // 🔶 حالة Sensor Error
       if (data.sensor_error) {
         upsertAlert(
-          name,
-          timeStr,
-          data.message || "Sensor error detected. Please inspect the sensor.",
-          "sensor"
-        );
+  name,
+  timeStr,
+  data.message || "Sensor error detected. Please inspect the sensor.",
+  true
+);
+
         // ما نتعامل معها كـ Failure للمعدة
         await fetchRecordsForSelected();
         return;
